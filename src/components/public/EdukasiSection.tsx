@@ -133,48 +133,6 @@ export const EdukasiSection: React.FC = () => {
         </div>
       </section>
 
-      {/* DOKUMENTASI NYATA SOSIALISASI WARGA */}
-      <section className="bg-white dark:bg-neutral-900 rounded-3xl p-6 sm:p-10 border border-neutral-200 dark:border-neutral-800 shadow-xs transition-colors space-y-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
-          <div className="lg:col-span-7 space-y-4">
-            <p className="text-xs font-bold text-blue-700 dark:text-blue-400 tracking-wide">
-              Edukasi Lapangan Nyata · RW 08 Kp. Curug
-            </p>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-neutral-900 dark:text-white text-balance">
-              Sosialisasi & Pendampingan Warga Secara Langsung
-            </h2>
-            <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">
-              Edukasi di Bank Sampah Persatuan tidak hanya berlangsung di atas kertas. Pengurus dan relawan terjun langsung ke lingkungan RT 001 s.d. RT 016 untuk memberikan pelatihan pemilahan sampah dari rumah serta tata cara pencatatan penjualan sampah warga.
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs text-neutral-700 dark:text-neutral-300">
-              <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>Pendampingan langsung pencatatan digital warga</span>
-              </div>
-              <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>Diskusi interaktif pemilahan 4 kategori sampah</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-5 space-y-3">
-            <div className="rounded-2xl overflow-hidden border border-neutral-200 dark:border-neutral-700 shadow-md aspect-[16/10] bg-neutral-900">
-              <img
-                src="/assets/aistudio/WhatsApp_Image_2026-10-29_at_15.58.58_f75d5c65.jpeg"
-                alt="Sosialisasi Edukasi Pemilahan Sampah bersama Ibu-Ibu Warga RW 08"
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 text-center flex items-center justify-center gap-1.5">
-              <Camera className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>Dokumentasi Edukasi Lapangan Pengurus BSP KREASI 308</span>
-            </p>
-          </div>
-        </div>
-      </section>
-
       {/* PANDUAN PEMILAHAN SAMPAH 4 KATEGORI */}
       <section className="bg-white dark:bg-neutral-900 rounded-3xl p-6 sm:p-10 border border-neutral-200 dark:border-neutral-800 shadow-xs space-y-8 transition-colors">
         <div className="max-w-3xl space-y-2">
@@ -248,6 +206,48 @@ export const EdukasiSection: React.FC = () => {
             <div className="pt-2 border-t border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-400">
               <strong>Solusi:</strong> Pisahkan dalam kantong khusus untuk diangkut petugas DLH ke tempat pengolahan akhir B3.
             </div>
+          </div>
+        </div>
+      </section>
+
+ {/* DOKUMENTASI NYATA SOSIALISASI WARGA */}
+      <section className="bg-white dark:bg-neutral-900 rounded-3xl p-6 sm:p-10 border border-neutral-200 dark:border-neutral-800 shadow-xs transition-colors space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+          <div className="lg:col-span-7 space-y-4">
+            <p className="text-xs font-bold text-blue-700 dark:text-blue-400 tracking-wide">
+              Edukasi Lapangan Nyata · RW 08 Kp. Curug
+            </p>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-neutral-900 dark:text-white text-balance">
+              Sosialisasi & Pendampingan Warga Secara Langsung
+            </h2>
+            <p className="text-sm text-neutral-600 dark:text-neutral-300 leading-relaxed">
+              Edukasi di Bank Sampah Persatuan tidak hanya berlangsung di atas kertas. Pengurus dan relawan terjun langsung ke lingkungan RT 001 s.d. RT 016 untuk memberikan pelatihan pemilahan sampah dari rumah serta tata cara pencatatan penjualan sampah warga.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs text-neutral-700 dark:text-neutral-300">
+              <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>Pendampingan langsung pencatatan digital warga</span>
+              </div>
+              <div className="flex items-center gap-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>Diskusi interaktif pemilahan 4 kategori sampah</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-5 space-y-3">
+            <div className="rounded-2xl overflow-hidden border border-neutral-200 dark:border-neutral-700 shadow-md aspect-[16/10] bg-neutral-900">
+              <img
+                src="/assets/aistudio/WhatsApp_Image_2026-10-29_at_15.58.58_f75d5c65.jpeg"
+                alt="Sosialisasi Edukasi Pemilahan Sampah bersama Ibu-Ibu Warga RW 08"
+                referrerPolicy="no-referrer"
+                className="w-full h-full object-cover"
+              />
+            </div>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 text-center flex items-center justify-center gap-1.5">
+              <Camera className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Dokumentasi Edukasi Lapangan Pengurus BSP KREASI 308</span>
+            </p>
           </div>
         </div>
       </section>

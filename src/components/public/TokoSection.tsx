@@ -2,25 +2,19 @@ import React, { useState, useMemo } from 'react';
 import {
   ShoppingBag,
   Search,
-  Sparkles,
-  Tag,
-  Scale,
   MessageCircle,
-  Heart,
   ZoomIn,
   X,
   Image as ImageIcon
 } from 'lucide-react';
-import type { WasteType, TokoProduct } from '../../types';
+import type { TokoProduct } from '../../types';
 
 interface TokoSectionProps {
-  wasteTypes: WasteType[];
   products: TokoProduct[];
   loadingProducts?: boolean;
 }
 
 export const TokoSection: React.FC<TokoSectionProps> = ({
-  wasteTypes,
   products,
   loadingProducts = false
 }) => {
@@ -28,10 +22,6 @@ export const TokoSection: React.FC<TokoSectionProps> = ({
   const [searchProduct, setSearchProduct] = useState<string>('');
   const [zoomProduct, setZoomProduct] = useState<TokoProduct | null>(null);
   const [brokenImages, setBrokenImages] = useState<Record<string, boolean>>({});
-
-  // Waste catalog search & filter
-  const [wasteSearch, setWasteSearch] = useState<string>('');
-  const [wasteCatFilter, setWasteCatFilter] = useState<string>('all');
 
   const categories = useMemo(() => {
     const dynamicCats = Array.from(new Set(products.map((p) => p.kategori).filter(Boolean)));
@@ -62,15 +52,6 @@ export const TokoSection: React.FC<TokoSectionProps> = ({
     return `https://wa.me/6285775437617?text=${text}`;
   };
 
-  const wasteCategories = ['all', ...Array.from(new Set(wasteTypes.map((w) => w.category)))];
-  const filteredWasteTypes = wasteTypes.filter((item) => {
-    const matchesCat = wasteCatFilter === 'all' || item.category === wasteCatFilter;
-    const matchesQuery =
-      item.name.toLowerCase().includes(wasteSearch.toLowerCase()) ||
-      item.category.toLowerCase().includes(wasteSearch.toLowerCase());
-    return matchesCat && matchesQuery;
-  });
-
   return (
     <div className="space-y-14 py-6 sm:py-10">
       {/* Header Banner */}
@@ -86,47 +67,6 @@ export const TokoSection: React.FC<TokoSectionProps> = ({
           <p className="text-amber-100 text-sm sm:text-base leading-relaxed">
             Memperkenalkan produk-produk ramah lingkungan hasil olahan sampah organik dan anorganik warga Bank Sampah “Persatuan” yang memiliki nilai guna tinggi serta bernilai ekonomi nyata.
           </p>
-        </div>
-      </section>
-
-      {/* Nilai Guna & Ekonomi Highlight */}
-      <section className="bg-white dark:bg-neutral-900 rounded-3xl p-6 sm:p-8 border border-neutral-200 dark:border-neutral-800 shadow-xs transition-colors">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-400 flex items-center justify-center shrink-0">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Nilai Guna Tinggi</h4>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 leading-relaxed">
-                Produk diolah secara higienis, kokoh, dan berdaya guna tinggi untuk kebutuhan harian rumah tangga, taman, dan busana.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-400 flex items-center justify-center shrink-0">
-              <Tag className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Memberdayakan Ekonomi Warga</h4>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 leading-relaxed">
-                100% pendapatan produk kembali untuk mendukung ibu-ibu perajin UP2K RW 08 dan operasional bank sampah.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-start gap-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-400 flex items-center justify-center shrink-0">
-              <Heart className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-neutral-900 dark:text-white">Dukungan Pemanfaatan Kembali</h4>
-              <p className="text-xs text-neutral-600 dark:text-neutral-400 mt-1 leading-relaxed">
-                Membeli produk daur ulang berarti Anda secara nyata mencegah sampah mencemari got, tanah, dan laut.
-              </p>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -316,82 +256,6 @@ export const TokoSection: React.FC<TokoSectionProps> = ({
             })}
           </div>
         )}
-      </section>
-
-      {/* Bagian Khusus: Katalog Jenis Sampah Diterima */}
-      <section className="bg-neutral-50 dark:bg-neutral-900 rounded-3xl p-6 sm:p-10 border border-neutral-200 dark:border-neutral-800 space-y-8 transition-colors">
-        <div className="max-w-3xl space-y-2">
-          <div className="inline-flex items-center gap-2 text-xs font-bold text-emerald-700 dark:text-emerald-400">
-            <Scale className="w-4 h-4" />
-            <span>Daftar Jenis Sampah Diterima</span>
-          </div>
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-neutral-900 dark:text-white">
-            Jenis Sampah Anorganik yang Dapat Dijual Warga
-          </h2>
-          <p className="text-sm text-neutral-600 dark:text-neutral-400">
-            Harga jual sampah bersifat fluktuatif menyesuaikan harga pasar pengepul dan ditulis langsung pada formulir penjualan di Beranda.
-          </p>
-        </div>
-
-        {/* Filter Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-white dark:bg-neutral-800 rounded-xl border border-neutral-200 dark:border-neutral-700">
-            {wasteCategories.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setWasteCatFilter(cat)}
-                className={`px-3 py-1 text-xs font-bold rounded-lg transition-all capitalize ${
-                  wasteCatFilter === cat
-                    ? 'bg-emerald-700 text-white'
-                    : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
-              >
-                {cat === 'all' ? 'Semua Kategori' : cat}
-              </button>
-            ))}
-          </div>
-
-          <div className="relative min-w-[240px]">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Cari jenis sampah..."
-              value={wasteSearch}
-              onChange={(e) => setWasteSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-            />
-          </div>
-        </div>
-
-        {/* Waste Type Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredWasteTypes.map((item) => (
-            <div
-              key={item.id}
-              className="p-5 rounded-2xl bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 hover:border-emerald-300 dark:hover:border-emerald-500 transition-all shadow-xs flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between text-[11px] text-neutral-500 dark:text-neutral-400 mb-1">
-                  <span className="font-bold text-emerald-800 dark:text-emerald-400">{item.category}</span>
-                  <span className="font-mono text-neutral-400 dark:text-neutral-500">{item.id}</span>
-                </div>
-                <h4 className="text-sm font-bold text-neutral-900 dark:text-white">{item.name}</h4>
-              </div>
-
-              <div className="mt-4 pt-3 border-t border-neutral-100 dark:border-neutral-700 flex items-baseline justify-between">
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">Satuan Timbang:</span>
-                <span className="text-xs font-bold font-mono text-emerald-700 dark:text-emerald-400">
-                  per {item.unit || 'kg'} · Harga Fluktuatif
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs">
-          <strong>Syarat Penjualan Sesuai SOP:</strong> Sampah anorganik wajib dalam kondisi bersih, kering, tidak berlumut atau tercampur sisa makanan. Minyak jelantah harus disaring dari remah sisa penggorengan.
-        </div>
       </section>
 
       {/* Product Photo Lightbox */}

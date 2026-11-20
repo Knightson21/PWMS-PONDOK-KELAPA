@@ -178,7 +178,6 @@ export const PublicLanding: React.FC = () => {
 
         {activeMenu === 'toko' && (
           <TokoSection 
-            wasteTypes={wasteTypes} 
             products={products}
             loadingProducts={loading}
           />
