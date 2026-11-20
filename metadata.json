@@ -1,0 +1,8 @@
+{
+  "name": "Sistem Informasi Bank Sampah Persatuan (PWMS)",
+  "description": "Sistem informasi pengelolaan nasabah, jenis sampah, transaksi setoran dengan bukti foto, verifikasi saldo, penarikan uang, dan laporan operasional Bank Sampah Persatuan.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
