@@ -12,6 +12,15 @@ import {
   RefreshCw,
   CheckCircle2
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip
+} from 'recharts';
 import { api } from '../../services/api';
 import type { TokoProduct } from '../../types';
 
@@ -276,6 +285,26 @@ export const AdminTokoProductsTab: React.FC<AdminTokoProductsTabProps> = ({ onNo
     }
   };
 
+  const tokoStats = useMemo(() => {
+    const tersediaCount = products.filter((p) => p.tersedia).length;
+    const withPhotoCount = products.filter((p) => Boolean(p.imageUrl)).length;
+    const catMap = new Map<string, { kategori: string; tersedia: number; habis: number; total: number }>();
+    products.forEach((p) => {
+      const cat = (p.kategori || 'Lainnya').trim();
+      const prev = catMap.get(cat) || { kategori: cat, tersedia: 0, habis: 0, total: 0 };
+      if (p.tersedia) prev.tersedia += 1;
+      else prev.habis += 1;
+      prev.total += 1;
+      catMap.set(cat, prev);
+    });
+    return {
+      tersediaCount,
+      habisCount: products.length - tersediaCount,
+      withPhotoCount,
+      chartData: Array.from(catMap.values()).sort((a, b) => b.total - a.total)
+    };
+  }, [products]);
+
   return (
     <div className="space-y-5">
       {/* Hidden Quick Photo Input */}
@@ -330,6 +359,74 @@ export const AdminTokoProductsTab: React.FC<AdminTokoProductsTabProps> = ({ onNo
           </button>
         </div>
       </div>
+
+      {/* Product Category & Stock Availability Chart */}
+      {!loading && tokoStats.chartData.length > 0 && (
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-extrabold text-neutral-900 dark:text-white">
+                Sebaran Produk Toko per Kategori & Status Stok
+              </h3>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                {tokoStats.tersediaCount} tersedia · {tokoStats.habisCount} stok habis · {tokoStats.withPhotoCount} dari {products.length} produk sudah memiliki foto
+              </p>
+            </div>
+            <div className="flex items-center gap-4 text-[11px] font-semibold text-neutral-600 dark:text-neutral-300">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-amber-600" />
+                Tersedia
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-neutral-400 dark:bg-neutral-600" />
+                Stok Habis
+              </span>
+            </div>
+          </div>
+
+          <div className="h-[175px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={tokoStats.chartData}
+                layout="vertical"
+                margin={{ top: 4, right: 16, left: 10, bottom: 4 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.2)" horizontal={false} />
+                <XAxis
+                  type="number"
+                  allowDecimals={false}
+                  tick={{ fontSize: 11, fill: '#737373' }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="kategori"
+                  width={136}
+                  tick={{ fontSize: 11, fill: '#737373', fontWeight: 600 }}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#171717',
+                    borderColor: '#262626',
+                    borderRadius: '12px',
+                    fontSize: '12px',
+                    color: '#fafafa'
+                  }}
+                  formatter={(value: any, name: any) => [
+                    `${value} produk`,
+                    name === 'tersedia' ? 'Tersedia' : 'Stok Habis'
+                  ]}
+                />
+                <Bar dataKey="tersedia" stackId="toko" fill="#d97706" barSize={16} />
+                <Bar dataKey="habis" stackId="toko" fill="#a3a3a3" radius={[0, 6, 6, 0]} barSize={16} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
 
       {/* Product Grid */}
       {loading ? (

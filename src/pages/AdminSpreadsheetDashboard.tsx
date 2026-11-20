@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
+  CalendarDays,
   FileSpreadsheet,
   Download,
   Plus,
@@ -16,21 +17,23 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   AlertCircle,
-  Upload,
-  Save,
   Scale,
   Wallet,
   Receipt,
-  ShoppingBag
+  ShoppingBag,
+  Menu
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { AdminMonthlySection } from '../components/admin/AdminMonthlySection';
+import { AdminAllSalesCharts } from '../components/admin/AdminAllSalesCharts';
 import { AdminTokoProductsTab } from '../components/admin/AdminTokoProductsTab';
-import { AdminOrgChartCard } from '../components/admin/AdminOrgChartCard';
+import { AdminCategoriesChart } from '../components/admin/AdminCategoriesChart';
+import { AdminVisualDatabaseTab } from '../components/admin/AdminVisualDatabaseTab';
 import type { WasteSaleRecord, WasteType } from '../types';
 
-type AdminTab = 'spreadsheet' | 'toko' | 'categories' | 'database';
+type AdminTab = 'monthly' | 'spreadsheet' | 'toko' | 'categories' | 'database';
 
 interface AdminSpreadsheetDashboardProps {
   onGoPublic: () => void;
@@ -61,11 +64,40 @@ function escapeCsvCell(value: string | number | undefined | null): string {
   return str;
 }
 
+const SECTION_META: Record<AdminTab, { group: string; title: string; subtitle: string }> = {
+  monthly: {
+    group: 'Laporan & Transaksi',
+    title: 'Data Bulan Ini',
+    subtitle: 'Ringkasan bulanan, tren harian, grafik kategori, kontribusi RT, dan transaksi periode terpilih.'
+  },
+  spreadsheet: {
+    group: 'Laporan & Transaksi',
+    title: 'Semua Data (Spreadsheet)',
+    subtitle: 'Data mentah penjualan warga seluruh periode lengkap dengan grafik tren dan ekspor CSV.'
+  },
+  toko: {
+    group: 'Katalog & Operasional',
+    title: 'Produk Toko & Foto',
+    subtitle: 'Kelola katalog produk daur ulang UP2K Kreasi 308, ketersediaan stok, dan foto produk.'
+  },
+  categories: {
+    group: 'Katalog & Operasional',
+    title: 'Daftar Jenis Sampah',
+    subtitle: 'Atur pilihan jenis sampah yang tampil di formulir penjualan warga pada halaman Beranda.'
+  },
+  database: {
+    group: 'Pengaturan & Data',
+    title: 'Pengelola Data & Cadangan',
+    subtitle: 'Pusat pengaturan wilayah RW/RT, bagan struktur profil, cadangan/pemulihan aman, dan riwayat aktivitas.'
+  }
+};
+
 export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps> = ({
   onGoPublic
 }) => {
   const { user, logout, openChangePasswordModal } = useAuth();
-  const [activeTab, setActiveTab] = useState<AdminTab>('spreadsheet');
+  const [activeTab, setActiveTab] = useState<AdminTab>('monthly');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Sales & Waste Types State
   const [sales, setSales] = useState<WasteSaleRecord[]>([]);
@@ -73,7 +105,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Filters
+  // Filters (for Semua Data / Spreadsheet tab)
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRt, setSelectedRt] = useState('ALL');
   const [startDate, setStartDate] = useState('');
@@ -104,14 +136,6 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
   const [catUnit, setCatUnit] = useState('kg');
   const [savingCat, setSavingCat] = useState(false);
 
-  // Database Tab State
-  const [dbJsonText, setDbJsonText] = useState('');
-  const [dbStats, setDbStats] = useState<any>(null);
-  const [dbLoading, setDbLoading] = useState(false);
-  const [dbSaving, setDbSaving] = useState(false);
-  const [pendingRestoreJson, setPendingRestoreJson] = useState<any>(null);
-  const restoreFileRef = useRef<HTMLInputElement | null>(null);
-
   const showToast = (type: 'success' | 'error', text: string) => {
     setBanner({ type, text });
   };
@@ -132,28 +156,9 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     }
   };
 
-  const loadDatabaseBackup = async () => {
-    setDbLoading(true);
-    try {
-      const res = await api.getDatabaseBackup();
-      setDbStats(res.stats);
-      setDbJsonText(JSON.stringify(res.db, null, 2));
-    } catch (err: any) {
-      showToast('error', err?.message || 'Gagal membaca basis data server.');
-    } finally {
-      setDbLoading(false);
-    }
-  };
-
   useEffect(() => {
     loadCoreData();
   }, []);
-
-  useEffect(() => {
-    if (activeTab === 'database' && !dbJsonText) {
-      loadDatabaseBackup();
-    }
-  }, [activeTab]);
 
   // Distinct RT list for filter dropdown
   const availableRts = useMemo(() => {
@@ -164,7 +169,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'id'));
   }, [sales]);
 
-  // Client-side filtered sales
+  // Client-side filtered sales (for Semua Data spreadsheet)
   const filteredSales = useMemo(() => {
     return sales.filter((s) => {
       if (selectedRt !== 'ALL' && s.sellerRt.trim().toLowerCase() !== selectedRt.toLowerCase()) {
@@ -237,9 +242,17 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     };
   }, [filteredSales, flattenedRows]);
 
-  // Export CSV (UTF-8 BOM, Excel compatible)
-  const handleExportCsv = () => {
-    if (flattenedRows.length === 0) {
+  // Shared CSV builder for both Monthly export and All-Data export
+  const exportSalesToCsv = (records: WasteSaleRecord[], fileName: string, labelDesc: string) => {
+    const rows: Array<{ rowNumber: number; sale: WasteSaleRecord; item: WasteSaleRecord['items'][number] }> = [];
+    let counter = 1;
+    records.forEach((sale) => {
+      sale.items.forEach((item) => {
+        rows.push({ rowNumber: counter++, sale, item });
+      });
+    });
+
+    if (rows.length === 0) {
       showToast('error', 'Tidak ada baris data untuk diekspor.');
       return;
     }
@@ -264,7 +277,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
 
     const lines = [headers.map(escapeCsvCell).join(',')];
 
-    flattenedRows.forEach(({ rowNumber, sale, item }) => {
+    rows.forEach(({ rowNumber, sale, item }) => {
       const dateStr = new Date(sale.date).toLocaleString('id-ID', {
         year: 'numeric',
         month: '2-digit',
@@ -301,24 +314,48 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    const today = new Date().toISOString().slice(0, 10);
     a.href = url;
-    a.download = `Data_Penjualan_Bank_Sampah_Persatuan_${today}.csv`;
+    a.download = fileName;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    showToast('success', `Berhasil mengekspor ${flattenedRows.length} baris data ke file spreadsheet CSV.`);
+    showToast('success', `Berhasil mengekspor ${rows.length} baris data ${labelDesc} ke file CSV.`);
+  };
+
+  const handleExportAllCsv = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    exportSalesToCsv(
+      filteredSales,
+      `Data_Penjualan_Bank_Sampah_Persatuan_${today}.csv`,
+      'spreadsheet lengkap'
+    );
+  };
+
+  const handleExportMonthCsv = (monthKey: string, monthLabel: string, monthSales: WasteSaleRecord[]) => {
+    exportSalesToCsv(
+      monthSales,
+      `Penjualan_BSP_${monthKey}.csv`,
+      `bulan ${monthLabel}`
+    );
   };
 
   // Open Sale Modal (Create or Edit)
-  const openCreateSaleModal = () => {
+  const openCreateSaleModal = (defaultMonthKey?: string) => {
     const defaultWtId = wasteTypes.find((w) => w.isActive !== false)?.id || wasteTypes[0]?.id || '';
     setEditingSale(null);
     setFormSellerName('');
     setFormSellerRt('');
-    setFormDate(toLocalDateTimeInput());
+
+    const now = new Date();
+    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    if (defaultMonthKey && defaultMonthKey !== currentKey) {
+      setFormDate(`${defaultMonthKey}-15T10:00`);
+    } else {
+      setFormDate(toLocalDateTimeInput());
+    }
+
     setFormNotes('');
     setFormRows([
       {
@@ -480,86 +517,185 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     }
   };
 
-  // Database Backup & Restore Handlers
-  const handleDownloadDbJson = () => {
-    if (!dbJsonText) return;
-    const blob = new Blob([dbJsonText], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `backup_db_bank_sampah_${new Date().toISOString().slice(0, 10)}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast('success', 'File backup basis data (.JSON) berhasil diunduh.');
-  };
-
-  const handleSaveDbJson = async () => {
-    setDbSaving(true);
-    try {
-      const parsed = JSON.parse(dbJsonText);
-      await api.restoreDatabase(parsed);
-      showToast('success', 'Perubahan basis data server (data/db.json) berhasil disimpan permanen.');
-      await Promise.all([loadCoreData(), loadDatabaseBackup()]);
-    } catch (err: any) {
-      showToast('error', `Gagal menyimpan JSON: ${err?.message || 'Format JSON tidak valid.'}`);
-    } finally {
-      setDbSaving(false);
-    }
-  };
-
-  const handleUploadRestoreFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result || '{}'));
-        setPendingRestoreJson(parsed);
-      } catch {
-        showToast('error', 'File JSON tidak valid dan tidak dapat dipulihkan.');
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
-  const handleConfirmRestoreFile = async () => {
-    if (!pendingRestoreJson) return;
-    setDbSaving(true);
-    try {
-      await api.restoreDatabase(pendingRestoreJson);
-      setPendingRestoreJson(null);
-      showToast('success', 'Basis data server berhasil dipulihkan dari file backup.');
-      await Promise.all([loadCoreData(), loadDatabaseBackup()]);
-    } catch (err: any) {
-      showToast('error', err?.message || 'Gagal memulihkan basis data.');
-    } finally {
-      setDbSaving(false);
-    }
-  };
-
   const hasActiveFilters = Boolean(searchQuery || selectedRt !== 'ALL' || startDate || endDate);
 
+  const sidebarGroups: Array<{
+    groupLabel: string;
+    items: Array<{ id: AdminTab; label: string; icon: React.ComponentType<{ className?: string }> }>;
+  }> = [
+    {
+      groupLabel: 'Laporan & Transaksi',
+      items: [
+        { id: 'monthly', label: 'Data Bulan Ini', icon: CalendarDays },
+        { id: 'spreadsheet', label: 'Semua Data (Sheet)', icon: FileSpreadsheet }
+      ]
+    },
+    {
+      groupLabel: 'Katalog & Operasional',
+      items: [
+        { id: 'toko', label: 'Produk Toko & Foto', icon: ShoppingBag },
+        { id: 'categories', label: 'Daftar Jenis Sampah', icon: Layers }
+      ]
+    },
+    {
+      groupLabel: 'Pengaturan & Data',
+      items: [{ id: 'database', label: 'Pengelola Data Visual', icon: Database }]
+    }
+  ];
+
+  const handleSelectTab = (tab: AdminTab) => {
+    setActiveTab(tab);
+    setMobileMenuOpen(false);
+  };
+
+  const currentMeta = SECTION_META[activeTab];
+
+  const renderSidebarContent = () => (
+    <div className="flex flex-col h-full bg-white dark:bg-neutral-900 border-r border-neutral-200 dark:border-neutral-800">
+      {/* Sidebar Brand Header */}
+      <div className="h-16 px-4 flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <img
+            src="/assets/aistudio/WhatsApp_Image_2026-10-29_at_15.12.54_f474b6b5.jpeg"
+            alt="Logo Bank Sampah Persatuan"
+            referrerPolicy="no-referrer"
+            className="w-8 h-8 object-contain rounded-full border border-amber-400 bg-neutral-950 shrink-0"
+          />
+          <div className="min-w-0">
+            <p className="text-xs font-extrabold text-neutral-900 dark:text-white truncate">
+              Bank Sampah Persatuan
+            </p>
+            <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold truncate">
+              Panel Admin Kreasi 308
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(false)}
+          className="lg:hidden p-1.5 rounded-lg text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          aria-label="Tutup menu"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Grouped Navigation Links */}
+      <nav className="flex-1 overflow-y-auto px-3 py-5 space-y-6">
+        {sidebarGroups.map((group) => (
+          <div key={group.groupLabel} className="space-y-1">
+            <p className="px-3 text-[11px] font-bold text-neutral-400 dark:text-neutral-500 tracking-wide">
+              {group.groupLabel}
+            </p>
+            <div className="space-y-0.5">
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const active = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectTab(item.id)}
+                    className={`w-full px-3 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2.5 transition-colors text-left ${
+                      active
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/70'
+                        : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/70 hover:text-neutral-900 dark:hover:text-white border border-transparent'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-4 h-4 shrink-0 ${
+                        active ? 'text-emerald-700 dark:text-emerald-400' : 'text-neutral-400 dark:text-neutral-500'
+                      }`}
+                    />
+                    <span className="truncate">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      {/* Sidebar Account Footer */}
+      <div className="p-3 border-t border-neutral-200 dark:border-neutral-800 space-y-2.5 shrink-0">
+        <div className="px-2.5 py-2 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200/70 dark:border-neutral-700/70">
+          <p className="text-[11px] text-neutral-500 dark:text-neutral-400">Masuk sebagai</p>
+          <p className="text-xs font-bold text-neutral-900 dark:text-white truncate">
+            {user?.name || 'Administrator'}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={openChangePasswordModal}
+            className="px-2.5 py-2 rounded-xl text-[11px] font-bold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>Sandi</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={logout}
+            className="px-2.5 py-2 rounded-xl text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 flex items-center justify-center gap-1.5 transition-colors whitespace-nowrap"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Keluar</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex flex-col transition-colors">
-      {/* Top Admin Header */}
-      <header className="sticky top-0 z-30 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 flex transition-colors">
+      {/* Desktop Fixed Left Sidebar */}
+      <aside className="hidden lg:block w-64 shrink-0 sticky top-0 h-screen">
+        {renderSidebarContent()}
+      </aside>
+
+      {/* Mobile Drawer Sidebar */}
+      {mobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-50 lg:hidden bg-neutral-950/60 backdrop-blur-xs flex"
+          onClick={() => setMobileMenuOpen(false)}
+        >
+          <div
+            className="w-64 max-w-[82vw] h-full shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {renderSidebarContent()}
+          </div>
+        </div>
+      )}
+
+      {/* Main Workspace Area */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* Contextual Top Bar */}
+        <header className="sticky top-0 z-30 h-16 bg-white/95 dark:bg-neutral-900/95 backdrop-blur-md border-b border-neutral-200 dark:border-neutral-800 px-4 sm:px-6 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
-            <img
-              src="/assets/aistudio/WhatsApp_Image_2026-10-29_at_15.12.54_f474b6b5.jpeg"
-              alt="Logo Bank Sampah Persatuan"
-              className="w-9 h-9 object-contain rounded-full border border-amber-400 bg-neutral-950 shrink-0"
-            />
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className="lg:hidden p-2 rounded-xl text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700"
+              aria-label="Buka menu navigasi"
+            >
+              <Menu className="w-4 h-4" />
+            </button>
+
             <div className="min-w-0">
-              <h1 className="text-sm sm:text-base font-extrabold text-neutral-900 dark:text-white truncate">
-                Admin Spreadsheet · Bank Sampah Persatuan
+              <div className="flex items-center gap-1.5 text-[11px] text-neutral-500 dark:text-neutral-400">
+                <span className="truncate">{currentMeta.group}</span>
+                <span aria-hidden="true">/</span>
+                <span className="font-semibold text-emerald-700 dark:text-emerald-400 truncate">
+                  {currentMeta.title}
+                </span>
+              </div>
+              <h1 className="text-sm sm:text-base font-extrabold text-neutral-900 dark:text-white truncate leading-tight">
+                {currentMeta.title}
               </h1>
-              <p className="text-[11px] text-neutral-500 dark:text-neutral-400 truncate">
-                Masuk sebagai {user?.name || 'Administrator'}
-              </p>
             </div>
           </div>
 
@@ -567,7 +703,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
             <button
               type="button"
               onClick={onGoPublic}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 flex items-center gap-1.5 transition-colors"
+              className="px-3 py-1.5 rounded-xl text-xs font-bold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 flex items-center gap-1.5 transition-colors whitespace-nowrap"
             >
               <Globe className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               <span className="hidden sm:inline">Halaman Publik</span>
@@ -575,573 +711,455 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
 
             <ThemeToggle />
 
-            <button
-              type="button"
-              onClick={openChangePasswordModal}
-              title="Ganti Kata Sandi Admin"
-              className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors"
-            >
-              <KeyRound className="w-4 h-4" />
-            </button>
-
-            <button
-              type="button"
-              onClick={logout}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-800 flex items-center gap-1.5 transition-colors"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Keluar</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Sub-navigation Tabs */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-neutral-100 dark:border-neutral-800/80 flex items-center gap-1 overflow-x-auto">
-          {[
-            { id: 'spreadsheet' as AdminTab, label: 'Data Penjualan (Spreadsheet)', icon: FileSpreadsheet },
-            { id: 'toko' as AdminTab, label: 'Produk Toko & Foto', icon: ShoppingBag },
-            { id: 'categories' as AdminTab, label: 'Daftar Jenis Sampah', icon: Layers },
-            { id: 'database' as AdminTab, label: 'Bagan Profil & Basis Data', icon: Database }
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.id;
-            return (
+            {(activeTab === 'monthly' || activeTab === 'spreadsheet') && (
               <button
-                key={tab.id}
                 type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-3 text-xs font-bold flex items-center gap-2 border-b-2 transition-colors whitespace-nowrap ${
-                  active
-                    ? 'border-emerald-600 text-emerald-700 dark:text-emerald-400'
-                    : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white'
-                }`}
+                onClick={() => openCreateSaleModal()}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 flex items-center gap-1.5 transition-colors whitespace-nowrap"
               >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Catat Penjualan</span>
               </button>
-            );
-          })}
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6 flex-1">
-        {/* Status Banner */}
-        {banner && (
-          <div
-            className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs sm:text-sm ${
-              banner.type === 'success'
-                ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
-                : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
-            }`}
-          >
-            <div className="flex items-center gap-2 font-medium">
-              {banner.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-              ) : (
-                <AlertCircle className="w-4 h-4 shrink-0" />
-              )}
-              <span>{banner.text}</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => setBanner(null)}
-              className="opacity-70 hover:opacity-100"
-              aria-label="Tutup notifikasi"
-            >
-              <X className="w-4 h-4" />
-            </button>
+            )}
           </div>
-        )}
+        </header>
 
-        {/* TAB 1: SPREADSHEET RAW DATA */}
-        {activeTab === 'spreadsheet' && (
-          <div className="space-y-5">
-            {/* Compact KPI Strip */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
-                  <span className="text-xs font-semibold">Total Transaksi</span>
-                  <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                </div>
-                <p className="text-2xl font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-1.5">
-                  {summary.totalTransactions.toLocaleString('id-ID')}
-                </p>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  Bukti penjualan tercatat
-                </p>
+        {/* Main Scrollable Viewport */}
+        <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+          {/* Status Banner */}
+          {banner && (
+            <div
+              className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 text-xs sm:text-sm ${
+                banner.type === 'success'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+              }`}
+            >
+              <div className="flex items-center gap-2 font-medium">
+                {banner.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{banner.text}</span>
               </div>
-
-              <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
-                  <span className="text-xs font-semibold">Baris Spreadsheet</span>
-                  <FileSpreadsheet className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                </div>
-                <p className="text-2xl font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-1.5">
-                  {summary.totalItemRows.toLocaleString('id-ID')}
-                </p>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  Total rincian jenis sampah
-                </p>
-              </div>
-
-              <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
-                <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
-                  <span className="text-xs font-semibold">Total Berat Terjual</span>
-                  <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                </div>
-                <p className="text-2xl font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-1.5">
-                  {summary.totalWeight.toLocaleString('id-ID')} <span className="text-sm font-bold">kg</span>
-                </p>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  Akumulasi bobot sesuai filter
-                </p>
-              </div>
-
-              <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-emerald-200 dark:border-emerald-800/70">
-                <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
-                  <span className="text-xs font-bold">Total Nilai Penjualan</span>
-                  <Wallet className="w-4 h-4" />
-                </div>
-                <p className="text-2xl font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1.5">
-                  {formatRupiah(summary.totalAmount)}
-                </p>
-                <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  Total nilai harga aktual warga
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => setBanner(null)}
+                className="opacity-70 hover:opacity-100"
+                aria-label="Tutup notifikasi"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
+          )}
 
-            {/* Filter & Action Toolbar */}
-            <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                {/* Search & Filters */}
-                <div className="flex flex-wrap items-center gap-2.5 flex-1">
-                  <div className="relative flex-1 min-w-[220px]">
-                    <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Cari kode, nama warga, RT, jenis sampah..."
-                      className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
+          {/* TAB 1: DATA BULAN INI (DEFAULT) */}
+          {activeTab === 'monthly' && (
+            <AdminMonthlySection
+              sales={sales}
+              loading={loading}
+              onCreateSale={openCreateSaleModal}
+              onEditSale={openEditSaleModal}
+              onDeleteSale={(sale) => setDeletingSale(sale)}
+              onPreviewPhoto={(photo) => setPreviewPhoto(photo)}
+              onExportMonthCsv={handleExportMonthCsv}
+            />
+          )}
+
+          {/* TAB 2: SEMUA DATA (SPREADSHEET + GRAFIK TREN) */}
+          {activeTab === 'spreadsheet' && (
+            <div className="space-y-5">
+              {/* Compact KPI Strip */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
+                    <span className="text-xs font-semibold">Total Transaksi</span>
+                    <Receipt className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                   </div>
-
-                  <select
-                    value={selectedRt}
-                    onChange={(e) => setSelectedRt(e.target.value)}
-                    className="px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="ALL">Semua RT</option>
-                    {availableRts.map((rt) => (
-                      <option key={rt} value={rt}>
-                        {rt}
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    title="Tanggal mulai"
-                    className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <span className="text-xs text-neutral-400">s/d</span>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    title="Tanggal selesai"
-                    className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-
-                  {hasActiveFilters && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSearchQuery('');
-                        setSelectedRt('ALL');
-                        setStartDate('');
-                        setEndDate('');
-                      }}
-                      className="px-2.5 py-2 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white"
-                    >
-                      Reset
-                    </button>
-                  )}
-                </div>
-
-                {/* Primary Actions */}
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={loadCoreData}
-                    title="Muat ulang data"
-                    className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={openCreateSaleModal}
-                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5 transition-colors"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Catat Manual</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleExportCsv}
-                    className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 flex items-center gap-1.5 transition-colors shadow-xs"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Ekspor Spreadsheet (.CSV)</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Raw Spreadsheet Table */}
-            <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-neutral-50 dark:bg-neutral-800/80 border-b border-neutral-200 dark:border-neutral-800 text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                      <th className="py-3 px-3 font-bold text-center w-10">No</th>
-                      <th className="py-3 px-3 font-bold whitespace-nowrap">Kode</th>
-                      <th className="py-3 px-3 font-bold whitespace-nowrap">Tanggal</th>
-                      <th className="py-3 px-3 font-bold">Nama Warga</th>
-                      <th className="py-3 px-3 font-bold whitespace-nowrap">RT</th>
-                      <th className="py-3 px-3 font-bold">Jenis Sampah</th>
-                      <th className="py-3 px-3 font-bold text-right whitespace-nowrap">Berat</th>
-                      <th className="py-3 px-3 font-bold text-right whitespace-nowrap">Harga / Satuan</th>
-                      <th className="py-3 px-3 font-bold text-right whitespace-nowrap">Subtotal</th>
-                      <th className="py-3 px-3 font-bold">Catatan</th>
-                      <th className="py-3 px-3 font-bold text-center">Bukti</th>
-                      <th className="py-3 px-3 font-bold text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
-                    {loading ? (
-                      <tr>
-                        <td colSpan={12} className="py-12 text-center text-neutral-500 dark:text-neutral-400">
-                          Memuat data penjualan sampah...
-                        </td>
-                      </tr>
-                    ) : flattenedRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={12} className="py-12 text-center text-neutral-500 dark:text-neutral-400">
-                          Belum ada data penjualan yang cocok dengan filter saat ini.
-                        </td>
-                      </tr>
-                    ) : (
-                      flattenedRows.map(({ rowNumber, sale, item, itemIndex }) => {
-                        const isFirstItem = itemIndex === 0;
-                        const dateFormatted = new Date(sale.date).toLocaleString('id-ID', {
-                          day: '2-digit',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit'
-                        });
-
-                        return (
-                          <tr
-                            key={`${sale.id}-${itemIndex}`}
-                            className={`hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors ${
-                              !isFirstItem ? 'bg-neutral-50/30 dark:bg-neutral-900/60' : ''
-                            }`}
-                          >
-                            <td className="py-2.5 px-3 text-center font-mono tabular-nums text-neutral-400">
-                              {rowNumber}
-                            </td>
-                            <td className="py-2.5 px-3 font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-                              {isFirstItem ? sale.id : <span className="text-neutral-400 font-normal">↳ {sale.id}</span>}
-                            </td>
-                            <td className="py-2.5 px-3 font-mono tabular-nums text-neutral-600 dark:text-neutral-300 whitespace-nowrap">
-                              {dateFormatted}
-                            </td>
-                            <td className="py-2.5 px-3 font-bold text-neutral-900 dark:text-white whitespace-nowrap">
-                              {sale.sellerName}
-                            </td>
-                            <td className="py-2.5 px-3 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">
-                              {sale.sellerRt}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <span className="font-semibold text-neutral-900 dark:text-white">
-                                {item.wasteTypeName}
-                              </span>
-                              {item.category && (
-                                <span className="ml-1.5 text-[10px] text-neutral-500 dark:text-neutral-400">
-                                  ({item.category})
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono tabular-nums text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
-                              {item.weight} {item.unit || 'kg'}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono tabular-nums text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
-                              {formatRupiah(item.pricePerKg)}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
-                              {formatRupiah(item.subtotal)}
-                            </td>
-                            <td className="py-2.5 px-3 max-w-[180px] truncate text-neutral-500 dark:text-neutral-400" title={sale.notes || ''}>
-                              {isFirstItem ? sale.notes || '-' : ''}
-                            </td>
-                            <td className="py-2.5 px-3 text-center">
-                              {isFirstItem && sale.photoUrl ? (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setPreviewPhoto({
-                                      url: sale.photoUrl!,
-                                      title: `${sale.id} — ${sale.sellerName} (${sale.sellerRt})`
-                                    })
-                                  }
-                                  className="inline-flex items-center justify-center p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800"
-                                  title="Lihat foto bukti"
-                                >
-                                  <ImageIcon className="w-3.5 h-3.5" />
-                                </button>
-                              ) : (
-                                <span className="text-neutral-300 dark:text-neutral-700">—</span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                              {isFirstItem ? (
-                                <div className="inline-flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditSaleModal(sale)}
-                                    title="Sunting transaksi"
-                                    className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                                  >
-                                    <Pencil className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDeletingSale(sale)}
-                                    title="Hapus transaksi"
-                                    className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-red-50 dark:hover:bg-red-950/50 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              ) : null}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 2: PRODUK TOKO & FOTO */}
-        {activeTab === 'toko' && <AdminTokoProductsTab onNotify={showToast} />}
-
-        {/* TAB 3: DAFTAR JENIS SAMPAH */}
-        {activeTab === 'categories' && (
-          <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-5">
-              <div>
-                <h2 className="text-base font-extrabold text-neutral-900 dark:text-white">
-                  Daftar Tetap Jenis Sampah (Pilihan Form Beranda)
-                </h2>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                  Kelola kategori jenis sampah yang tampil di formulir warga. Harga bersifat fluktuatif dan selalu ditulis langsung oleh warga saat transaksi.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={openCreateCategoryModal}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 flex items-center gap-1.5 w-fit shrink-0 transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Tambah Jenis Sampah</span>
-              </button>
-            </div>
-
-            <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-neutral-50 dark:bg-neutral-800/80 border-b border-neutral-200 dark:border-neutral-800 text-[11px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-                      <th className="py-3 px-4 font-bold">Nama Jenis Sampah</th>
-                      <th className="py-3 px-4 font-bold">Kelompok / Kategori</th>
-                      <th className="py-3 px-4 font-bold">Satuan</th>
-                      <th className="py-3 px-4 font-bold">Status di Form</th>
-                      <th className="py-3 px-4 font-bold text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
-                    {wasteTypes.map((wt) => (
-                      <tr key={wt.id} className="hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40">
-                        <td className="py-3 px-4 font-bold text-neutral-900 dark:text-white">
-                          {wt.name}
-                        </td>
-                        <td className="py-3 px-4 text-neutral-600 dark:text-neutral-300">
-                          {wt.category}
-                        </td>
-                        <td className="py-3 px-4 font-mono text-neutral-600 dark:text-neutral-300">
-                          {wt.unit || 'kg'}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span
-                            className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-[11px] font-bold ${
-                              wt.isActive !== false
-                                ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700'
-                            }`}
-                          >
-                            {wt.isActive !== false ? 'Aktif' : 'Nonaktif'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right whitespace-nowrap space-x-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditCategoryModal(wt)}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
-                          >
-                            Sunting
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleCategoryActive(wt)}
-                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
-                          >
-                            {wt.isActive !== false ? 'Nonaktifkan' : 'Aktifkan'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: BAGAN PROFIL & BASIS DATA SERVER */}
-        {activeTab === 'database' && (
-          <div className="space-y-5">
-            <AdminOrgChartCard onNotify={showToast} />
-
-            <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-6 space-y-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-neutral-100 dark:border-neutral-800 pb-4">
-                <div>
-                  <h2 className="text-base font-extrabold text-neutral-900 dark:text-white">
-                    Kelola Basis Data File Server (data/db.json)
-                  </h2>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-                    Semua data penjualan warga tersimpan permanen di file server. Anda dapat mengunduh cadangan, memulihkan dari file backup, atau menyunting JSON secara langsung.
+                  <p className="text-2xl font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-1.5">
+                    {summary.totalTransactions.toLocaleString('id-ID')}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    Bukti penjualan tercatat
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={loadDatabaseBackup}
-                    disabled={dbLoading}
-                    className="px-3 py-2 rounded-xl text-xs font-bold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 flex items-center gap-1.5"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${dbLoading ? 'animate-spin' : ''}`} />
-                    <span>Muat Ulang</span>
-                  </button>
+                <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
+                    <span className="text-xs font-semibold">Baris Spreadsheet</span>
+                    <FileSpreadsheet className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  </div>
+                  <p className="text-2xl font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-1.5">
+                    {summary.totalItemRows.toLocaleString('id-ID')}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    Total rincian jenis sampah
+                  </p>
+                </div>
 
-                  <button
-                    type="button"
-                    onClick={handleDownloadDbJson}
-                    disabled={!dbJsonText}
-                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Unduh Backup (.JSON)</span>
-                  </button>
+                <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
+                  <div className="flex items-center justify-between text-neutral-500 dark:text-neutral-400">
+                    <span className="text-xs font-semibold">Total Berat Terjual</span>
+                    <Scale className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <p className="text-2xl font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-1.5">
+                    {summary.totalWeight.toLocaleString('id-ID')}{' '}
+                    <span className="text-sm font-bold text-neutral-500 dark:text-neutral-400">kg</span>
+                  </p>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    Akumulasi bobot sesuai filter
+                  </p>
+                </div>
 
-                  <input
-                    ref={restoreFileRef}
-                    type="file"
-                    accept=".json,application/json"
-                    onChange={handleUploadRestoreFile}
-                    className="hidden"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => restoreFileRef.current?.click()}
-                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-amber-800 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/50 hover:bg-amber-100 dark:hover:bg-amber-900/50 border border-amber-200 dark:border-amber-800 flex items-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>Pulihkan dari File</span>
-                  </button>
+                <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-emerald-200 dark:border-emerald-800/70">
+                  <div className="flex items-center justify-between text-emerald-700 dark:text-emerald-400">
+                    <span className="text-xs font-bold">Total Nilai Penjualan</span>
+                    <Wallet className="w-4 h-4" />
+                  </div>
+                  <p className="text-2xl font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1.5">
+                    {formatRupiah(summary.totalAmount)}
+                  </p>
+                  <p className="text-[11px] text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    Total nilai harga aktual warga
+                  </p>
                 </div>
               </div>
 
-              {dbStats && (
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
-                    <p className="text-neutral-500 dark:text-neutral-400">Transaksi Penjualan</p>
-                    <p className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-0.5">
-                      {dbStats.salesCount ?? 0}
-                    </p>
+              {/* All-Time Sales Charts (Synced with active filter) */}
+              <AdminAllSalesCharts sales={filteredSales} />
+
+              {/* Filter & Action Toolbar */}
+              <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  {/* Search & Filters */}
+                  <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                    <div className="relative flex-1 min-w-[220px]">
+                      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Cari kode, nama warga, RT, jenis sampah..."
+                        className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+
+                    <select
+                      value={selectedRt}
+                      onChange={(e) => setSelectedRt(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="ALL">Semua RT</option>
+                      {availableRts.map((rt) => (
+                        <option key={rt} value={rt}>
+                          {rt}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      title="Tanggal mulai"
+                      className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <span className="text-xs text-neutral-400">s/d</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      title="Tanggal selesai"
+                      className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+
+                    {hasActiveFilters && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSelectedRt('ALL');
+                          setStartDate('');
+                          setEndDate('');
+                        }}
+                        className="px-2.5 py-2 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white"
+                      >
+                        Reset
+                      </button>
+                    )}
                   </div>
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
-                    <p className="text-neutral-500 dark:text-neutral-400">Total Berat Penjualan</p>
-                    <p className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-0.5">
-                      {(dbStats.totalSalesWeight ?? 0).toLocaleString('id-ID')} kg
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
-                    <p className="text-neutral-500 dark:text-neutral-400">Total Nilai Penjualan</p>
-                    <p className="text-lg font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-0.5">
-                      {formatRupiah(dbStats.totalSalesAmount ?? 0)}
-                    </p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
-                    <p className="text-neutral-500 dark:text-neutral-400">Jenis Sampah</p>
-                    <p className="text-lg font-black font-mono tabular-nums text-neutral-900 dark:text-white mt-0.5">
-                      {dbStats.wasteTypeCount ?? wasteTypes.length}
-                    </p>
+
+                  {/* Primary Actions */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={loadCoreData}
+                      title="Muat ulang data"
+                      className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openCreateSaleModal()}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Catat Manual</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportAllCsv}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 flex items-center gap-1.5 transition-colors shadow-xs whitespace-nowrap"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Ekspor Spreadsheet (.CSV)</span>
+                    </button>
                   </div>
                 </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  Editor JSON Langsung (data/db.json)
-                </label>
-                <textarea
-                  rows={16}
-                  value={dbJsonText}
-                  onChange={(e) => setDbJsonText(e.target.value)}
-                  spellCheck={false}
-                  className="w-full p-4 font-mono text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-950 text-emerald-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
               </div>
 
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSaveDbJson}
-                  disabled={dbSaving || !dbJsonText}
-                  className="px-5 py-2.5 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 flex items-center gap-2 transition-colors"
-                >
-                  <Save className="w-4 h-4" />
-                  <span>{dbSaving ? 'Menyimpan...' : 'Simpan Perubahan ke Server'}</span>
-                </button>
+              {/* Raw Spreadsheet Table */}
+              <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-neutral-50 dark:bg-neutral-800/80 border-b border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-500 dark:text-neutral-400">
+                        <th className="py-3 px-3 font-bold text-center w-10">No</th>
+                        <th className="py-3 px-3 font-bold whitespace-nowrap">Kode</th>
+                        <th className="py-3 px-3 font-bold whitespace-nowrap">Tanggal</th>
+                        <th className="py-3 px-3 font-bold">Nama Warga</th>
+                        <th className="py-3 px-3 font-bold whitespace-nowrap">RT</th>
+                        <th className="py-3 px-3 font-bold">Jenis Sampah</th>
+                        <th className="py-3 px-3 font-bold text-right whitespace-nowrap">Berat</th>
+                        <th className="py-3 px-3 font-bold text-right whitespace-nowrap">Harga / Satuan</th>
+                        <th className="py-3 px-3 font-bold text-right whitespace-nowrap">Subtotal</th>
+                        <th className="py-3 px-3 font-bold">Catatan</th>
+                        <th className="py-3 px-3 font-bold text-center">Bukti</th>
+                        <th className="py-3 px-3 font-bold text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                      {loading ? (
+                        <tr>
+                          <td colSpan={12} className="py-12 text-center text-neutral-500 dark:text-neutral-400">
+                            Memuat data penjualan sampah...
+                          </td>
+                        </tr>
+                      ) : flattenedRows.length === 0 ? (
+                        <tr>
+                          <td colSpan={12} className="py-12 text-center text-neutral-500 dark:text-neutral-400">
+                            Belum ada data penjualan yang cocok dengan filter saat ini.
+                          </td>
+                        </tr>
+                      ) : (
+                        flattenedRows.map(({ rowNumber, sale, item, itemIndex }) => {
+                          const isFirstItem = itemIndex === 0;
+                          const dateFormatted = new Date(sale.date).toLocaleString('id-ID', {
+                            day: '2-digit',
+                            month: 'short',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          });
+
+                          return (
+                            <tr
+                              key={`${sale.id}-${itemIndex}`}
+                              className={`hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40 transition-colors ${
+                                !isFirstItem ? 'bg-neutral-50/30 dark:bg-neutral-900/60' : ''
+                              }`}
+                            >
+                              <td className="py-2.5 px-3 text-center font-mono tabular-nums text-neutral-400">
+                                {rowNumber}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                                {isFirstItem ? sale.id : <span className="text-neutral-400 font-normal">↳ {sale.id}</span>}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono tabular-nums text-neutral-600 dark:text-neutral-300 whitespace-nowrap">
+                                {dateFormatted}
+                              </td>
+                              <td className="py-2.5 px-3 font-bold text-neutral-900 dark:text-white whitespace-nowrap">
+                                {sale.sellerName}
+                              </td>
+                              <td className="py-2.5 px-3 text-neutral-600 dark:text-neutral-300 whitespace-nowrap">
+                                {sale.sellerRt}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <span className="font-semibold text-neutral-900 dark:text-white">
+                                  {item.wasteTypeName}
+                                </span>
+                                {item.category && (
+                                  <span className="ml-1.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+                                    ({item.category})
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
+                                {item.weight} {item.unit || 'kg'}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums text-neutral-800 dark:text-neutral-200 whitespace-nowrap">
+                                {formatRupiah(item.pricePerKg)}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                                {formatRupiah(item.subtotal)}
+                              </td>
+                              <td className="py-2.5 px-3 max-w-[180px] truncate text-neutral-500 dark:text-neutral-400" title={sale.notes || ''}>
+                                {isFirstItem ? sale.notes || '-' : ''}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                {isFirstItem && sale.photoUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPreviewPhoto({
+                                        url: sale.photoUrl!,
+                                        title: `${sale.id} — ${sale.sellerName} (${sale.sellerRt})`
+                                      })
+                                    }
+                                    className="inline-flex items-center justify-center p-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800"
+                                    title="Lihat foto bukti"
+                                  >
+                                    <ImageIcon className="w-3.5 h-3.5" />
+                                  </button>
+                                ) : (
+                                  <span className="text-neutral-300 dark:text-neutral-700">—</span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                {isFirstItem ? (
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditSaleModal(sale)}
+                                      title="Sunting transaksi"
+                                      className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setDeletingSale(sale)}
+                                      title="Hapus transaksi"
+                                      className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-red-50 dark:hover:bg-red-950/50 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+
+          {/* TAB 3: PRODUK TOKO & FOTO */}
+          {activeTab === 'toko' && <AdminTokoProductsTab onNotify={showToast} />}
+
+          {/* TAB 4: DAFTAR JENIS SAMPAH */}
+          {activeTab === 'categories' && (
+            <div className="space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-5">
+                <div>
+                  <h2 className="text-base font-extrabold text-neutral-900 dark:text-white">
+                    Daftar Tetap Jenis Sampah (Pilihan Form Beranda)
+                  </h2>
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+                    Kelola kategori jenis sampah yang tampil di formulir warga. Harga bersifat fluktuatif dan selalu ditulis langsung oleh warga saat transaksi.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openCreateCategoryModal}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 flex items-center gap-1.5 w-fit shrink-0 transition-colors whitespace-nowrap"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Tambah Jenis Sampah</span>
+                </button>
+              </div>
+
+              {/* Waste Category Distribution Chart */}
+              <AdminCategoriesChart wasteTypes={wasteTypes} />
+
+              <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-neutral-50 dark:bg-neutral-800/80 border-b border-neutral-200 dark:border-neutral-800 text-[11px] text-neutral-500 dark:text-neutral-400">
+                        <th className="py-3 px-4 font-bold">Nama Jenis Sampah</th>
+                        <th className="py-3 px-4 font-bold">Kelompok / Kategori</th>
+                        <th className="py-3 px-4 font-bold">Satuan</th>
+                        <th className="py-3 px-4 font-bold">Status di Form</th>
+                        <th className="py-3 px-4 font-bold text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-neutral-200 dark:divide-neutral-800">
+                      {wasteTypes.map((wt) => (
+                        <tr key={wt.id} className="hover:bg-neutral-50/80 dark:hover:bg-neutral-800/40">
+                          <td className="py-3 px-4 font-bold text-neutral-900 dark:text-white">
+                            {wt.name}
+                          </td>
+                          <td className="py-3 px-4 text-neutral-600 dark:text-neutral-300">
+                            {wt.category}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-neutral-600 dark:text-neutral-300">
+                            {wt.unit || 'kg'}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span
+                              className={`text-[11px] font-bold ${
+                                wt.isActive !== false
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : 'text-neutral-400 dark:text-neutral-500'
+                              }`}
+                            >
+                              {wt.isActive !== false ? 'Aktif di Form' : 'Disembunyikan'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right whitespace-nowrap space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => openEditCategoryModal(wt)}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors"
+                            >
+                              Sunting
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleCategoryActive(wt)}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                            >
+                              {wt.isActive !== false ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: PENGELOLA DATA VISUAL (ZERO JSON CODE) */}
+          {activeTab === 'database' && (
+            <AdminVisualDatabaseTab
+              onNotify={showToast}
+              onDataRestored={loadCoreData}
+              onNavigateTab={handleSelectTab}
+            />
+          )}
+        </main>
+      </div>
 
       {/* MODAL: CREATE / EDIT SALE */}
       {saleModalOpen && (
@@ -1153,7 +1171,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
                   {editingSale ? `Sunting Data Penjualan (${editingSale.id})` : 'Catat Penjualan Sampah Manual'}
                 </h3>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  Perubahan langsung tersimpan ke data spreadsheet server.
+                  Perubahan langsung tersimpan ke data spreadsheet dan memperbarui grafik.
                 </p>
               </div>
               <button
@@ -1474,37 +1492,6 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
         </div>
       )}
 
-      {/* MODAL: RESTORE CONFIRMATION */}
-      {pendingRestoreJson && (
-        <div className="fixed inset-0 z-50 bg-neutral-950/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 w-full max-w-md p-6 space-y-4 shadow-xl">
-            <h3 className="text-base font-extrabold text-neutral-900 dark:text-white">
-              Konfirmasi Pemulihan Basis Data
-            </h3>
-            <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
-              Memulihkan file JSON ini akan menimpa data server (<code className="font-mono">data/db.json</code>) saat ini. Pastikan Anda sudah mengunduh cadangan terlebih dahulu.
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setPendingRestoreJson(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                disabled={dbSaving}
-                onClick={handleConfirmRestoreFile}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60"
-              >
-                {dbSaving ? 'Memulihkan...' : 'Ya, Pulihkan Data'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* PHOTO LIGHTBOX MODAL */}
       {previewPhoto && (
         <div
@@ -1529,6 +1516,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
               <img
                 src={previewPhoto.url}
                 alt={previewPhoto.title}
+                referrerPolicy="no-referrer"
                 className="max-h-[75vh] w-auto object-contain rounded-lg"
               />
             </div>
