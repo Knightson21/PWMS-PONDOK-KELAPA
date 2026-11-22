@@ -1148,9 +1148,9 @@ async function startServer() {
     return res.json(stats);
   });
 
-  // Public waste sale recording (no account / no login required, fluctuative price written directly)
+  // Public waste sale recording (no account / no login required, fluctuative price written directly, strictly live server time)
   app.post('/api/public/sales', (req: Request, res: Response) => {
-    const { sellerName, sellerRt, date, items, photoUrl, notes } = req.body;
+    const { sellerName, sellerRt, items, photoUrl, notes } = req.body;
 
     if (!sellerName || !String(sellerName).trim()) {
       return res.status(400).json({ error: 'Nama warga penjual wajib diisi.' });
@@ -1202,8 +1202,8 @@ async function startServer() {
     });
     const nextId = `JUAL-${String(maxNum + 1).padStart(4, '0')}`;
 
-    const parsedDate = date ? new Date(date) : new Date();
-    const isoDate = isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
+    // Always lock public user sale submissions to live server date & time
+    const isoDate = new Date().toISOString();
 
     const newSale: WasteSaleRecord = {
       id: nextId,
@@ -2970,7 +2970,13 @@ async function startServer() {
     });
     const nextId = `JUAL-${String(maxNum + 1).padStart(4, '0')}`;
     const parsedDate = date ? new Date(date) : new Date();
-    const isoDate = isNaN(parsedDate.getTime()) ? new Date().toISOString() : parsedDate.toISOString();
+    if (date && isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ error: 'Format tanggal dan waktu transaksi tidak valid.' });
+    }
+    if (parsedDate.getTime() > Date.now() + 2 * 60 * 1000) {
+      return res.status(400).json({ error: 'Tanggal dan waktu transaksi tidak boleh melebihi waktu saat ini.' });
+    }
+    const isoDate = parsedDate.toISOString();
 
     const newSale: WasteSaleRecord = {
       id: nextId,
@@ -3057,6 +3063,12 @@ async function startServer() {
     }
 
     const parsedDate = date ? new Date(date) : new Date(existing.date);
+    if (date && isNaN(parsedDate.getTime())) {
+      return res.status(400).json({ error: 'Format tanggal dan waktu transaksi tidak valid.' });
+    }
+    if (date && parsedDate.getTime() > Date.now() + 2 * 60 * 1000) {
+      return res.status(400).json({ error: 'Tanggal dan waktu transaksi tidak boleh melebihi waktu saat ini.' });
+    }
     const isoDate = isNaN(parsedDate.getTime()) ? existing.date : parsedDate.toISOString();
 
     const updated: WasteSaleRecord = {

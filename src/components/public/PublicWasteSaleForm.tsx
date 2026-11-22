@@ -10,7 +10,9 @@ import {
   AlertCircle,
   FileText,
   X,
-  Upload
+  Upload,
+  Clock,
+  Lock
 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { WasteType, WasteSaleRecord } from '../../types';
@@ -27,10 +29,16 @@ interface SaleRowInput {
   pricePerKg: string;
 }
 
-function getLocalDateTimeValue(): string {
-  const now = new Date();
-  const offsetMs = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16);
+function formatLiveDateTime(date: Date): string {
+  return date.toLocaleString('id-ID', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
 }
 
 function createEmptyRow(defaultWasteTypeId: string): SaleRowInput {
@@ -87,7 +95,7 @@ export const PublicWasteSaleForm: React.FC<PublicWasteSaleFormProps> = ({
 
   const [sellerName, setSellerName] = useState('');
   const [sellerRt, setSellerRt] = useState('');
-  const [saleDate, setSaleDate] = useState(getLocalDateTimeValue());
+  const [liveNow, setLiveNow] = useState<Date>(() => new Date());
   const [rows, setRows] = useState<SaleRowInput[]>(() => [createEmptyRow('')]);
   const [photoUrl, setPhotoUrl] = useState('');
   const [photoName, setPhotoName] = useState('');
@@ -97,6 +105,14 @@ export const PublicWasteSaleForm: React.FC<PublicWasteSaleFormProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [submittedSale, setSubmittedSale] = useState<WasteSaleRecord | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Tick live clock every second so user always sees exact live date/time
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLiveNow(new Date());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // Sync first empty row's wasteTypeId once wasteTypes finishes loading
   React.useEffect(() => {
@@ -189,7 +205,7 @@ export const PublicWasteSaleForm: React.FC<PublicWasteSaleFormProps> = ({
   const handleResetForm = () => {
     setSellerName('');
     setSellerRt('');
-    setSaleDate(getLocalDateTimeValue());
+    setLiveNow(new Date());
     setRows([createEmptyRow(defaultWasteId)]);
     handleClearPhoto();
     setNotes('');
@@ -235,11 +251,9 @@ export const PublicWasteSaleForm: React.FC<PublicWasteSaleFormProps> = ({
 
     setSubmitting(true);
     try {
-      const isoDate = saleDate ? new Date(saleDate).toISOString() : new Date().toISOString();
       const res = await api.submitPublicSale({
         sellerName: sellerName.trim(),
         sellerRt: sellerRt.trim(),
-        date: isoDate,
         items: preparedItems,
         photoUrl: photoUrl || undefined,
         notes: notes.trim() || undefined
@@ -512,25 +526,33 @@ export const PublicWasteSaleForm: React.FC<PublicWasteSaleFormProps> = ({
         </div>
       </div>
 
-      {/* Section 2: Tanggal & Waktu Penjualan */}
+      {/* Section 2: Tanggal & Waktu Penjualan (Live Otomatis Terkunci Server) */}
       <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-6 shadow-xs space-y-4">
-        <div className="border-b border-neutral-100 dark:border-neutral-800 pb-3">
-          <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
-            2. Tanggal & Waktu Penjualan <span className="text-red-500">*</span>
-          </h3>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-            Sesuaikan tanggal dan jam saat penyerahan/penimbangan sampah dilakukan.
-          </p>
+        <div className="border-b border-neutral-100 dark:border-neutral-800 pb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm sm:text-base font-bold text-neutral-900 dark:text-white">
+              2. Tanggal & Waktu Penjualan (Waktu Langsung)
+            </h3>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+              Formulir warga hanya berlaku untuk pencatatan langsung saat ini dan dikunci otomatis oleh server.
+            </p>
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+            <Lock className="w-3.5 h-3.5" />
+            <span>Terkunci Waktu Live</span>
+          </span>
         </div>
 
-        <div className="max-w-xs">
-          <input
-            type="datetime-local"
-            required
-            value={saleDate}
-            onChange={(e) => setSaleDate(e.target.value)}
-            className="w-full px-3.5 py-2.5 text-sm font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-colors"
-          />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Clock className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+            <span className="text-sm font-mono font-bold tabular-nums text-neutral-900 dark:text-white">
+              {formatLiveDateTime(liveNow)} WIB
+            </span>
+          </div>
+          <span className="text-[11px] text-neutral-500 dark:text-neutral-400 shrink-0">
+            Stempel waktu resmi dicatat saat tombol kirim ditekan
+          </span>
         </div>
       </div>
 

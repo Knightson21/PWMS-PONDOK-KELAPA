@@ -21,7 +21,8 @@ import {
   Wallet,
   Receipt,
   ShoppingBag,
-  Menu
+  Menu,
+  Filter
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../services/api';
@@ -31,6 +32,8 @@ import { AdminAllSalesCharts } from '../components/admin/AdminAllSalesCharts';
 import { AdminTokoProductsTab } from '../components/admin/AdminTokoProductsTab';
 import { AdminCategoriesChart } from '../components/admin/AdminCategoriesChart';
 import { AdminVisualDatabaseTab } from '../components/admin/AdminVisualDatabaseTab';
+import { AdminSaleFormModal } from '../components/admin/AdminSaleFormModal';
+import { buildWasteCategoryOptions, filterAndProjectSales } from '../utils/adminSalesFilter';
 import type { WasteSaleRecord, WasteType } from '../types';
 
 type AdminTab = 'monthly' | 'spreadsheet' | 'toko' | 'categories' | 'database';
@@ -39,21 +42,8 @@ interface AdminSpreadsheetDashboardProps {
   onGoPublic: () => void;
 }
 
-interface SaleFormRow {
-  rowId: string;
-  wasteTypeId: string;
-  weight: string;
-  pricePerKg: string;
-}
-
 function formatRupiah(val: number): string {
   return 'Rp' + Math.round(val || 0).toLocaleString('id-ID');
-}
-
-function toLocalDateTimeInput(iso?: string): string {
-  const date = iso ? new Date(iso) : new Date();
-  const offsetMs = date.getTimezoneOffset() * 60000;
-  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 }
 
 function escapeCsvCell(value: string | number | undefined | null): string {
@@ -107,6 +97,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
 
   // Filters (for Semua Data / Spreadsheet tab)
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [selectedRt, setSelectedRt] = useState('ALL');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -114,15 +105,10 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
   // Photo lightbox
   const [previewPhoto, setPreviewPhoto] = useState<{ url: string; title: string } | null>(null);
 
-  // Sale Create / Edit Modal
+  // Sale Create / Edit Modal (Admin backdate-capable modal)
   const [saleModalOpen, setSaleModalOpen] = useState(false);
   const [editingSale, setEditingSale] = useState<WasteSaleRecord | null>(null);
-  const [formSellerName, setFormSellerName] = useState('');
-  const [formSellerRt, setFormSellerRt] = useState('');
-  const [formDate, setFormDate] = useState('');
-  const [formNotes, setFormNotes] = useState('');
-  const [formRows, setFormRows] = useState<SaleFormRow[]>([]);
-  const [savingSale, setSavingSale] = useState(false);
+  const [saleDefaultMonthKey, setSaleDefaultMonthKey] = useState<string | undefined>(undefined);
 
   // Delete Confirmation Modal
   const [deletingSale, setDeletingSale] = useState<WasteSaleRecord | null>(null);
@@ -169,39 +155,24 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'id'));
   }, [sales]);
 
-  // Client-side filtered sales (for Semua Data spreadsheet)
-  const filteredSales = useMemo(() => {
-    return sales.filter((s) => {
-      if (selectedRt !== 'ALL' && s.sellerRt.trim().toLowerCase() !== selectedRt.toLowerCase()) {
-        return false;
-      }
-      if (startDate) {
-        const saleMs = new Date(s.date).getTime();
-        const startMs = new Date(`${startDate}T00:00:00`).getTime();
-        if (saleMs < startMs) return false;
-      }
-      if (endDate) {
-        const saleMs = new Date(s.date).getTime();
-        const endMs = new Date(`${endDate}T23:59:59.999`).getTime();
-        if (saleMs > endMs) return false;
-      }
-      if (searchQuery.trim()) {
-        const q = searchQuery.trim().toLowerCase();
-        const inHeader =
-          s.id.toLowerCase().includes(q) ||
-          s.sellerName.toLowerCase().includes(q) ||
-          s.sellerRt.toLowerCase().includes(q) ||
-          (s.notes || '').toLowerCase().includes(q);
-        const inItems = s.items.some(
-          (it) =>
-            it.wasteTypeName.toLowerCase().includes(q) ||
-            (it.category || '').toLowerCase().includes(q)
-        );
-        if (!inHeader && !inItems) return false;
-      }
-      return true;
-    });
-  }, [sales, selectedRt, startDate, endDate, searchQuery]);
+  // Distinct waste categories from database + guaranteed "Organik"
+  const categoryOptions = useMemo(
+    () => buildWasteCategoryOptions(wasteTypes, sales),
+    [wasteTypes, sales]
+  );
+
+  // Client-side filtered & category-projected sales (for Semua Data spreadsheet, KPIs, charts, CSV)
+  const { projectedSales: filteredSales, originalById: originalSalesById } = useMemo(
+    () =>
+      filterAndProjectSales(sales, {
+        category: selectedCategory,
+        searchQuery,
+        rt: selectedRt,
+        startDate,
+        endDate
+      }),
+    [sales, selectedCategory, searchQuery, selectedRt, startDate, endDate]
+  );
 
   // Flattened spreadsheet rows (1 row per waste item)
   const flattenedRows = useMemo(() => {
@@ -324,119 +295,57 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     showToast('success', `Berhasil mengekspor ${rows.length} baris data ${labelDesc} ke file CSV.`);
   };
 
+  const slugifyCategory = (cat: string) =>
+    cat.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+
   const handleExportAllCsv = () => {
     const today = new Date().toISOString().slice(0, 10);
+    const catSlug =
+      selectedCategory !== 'ALL' ? `_${slugifyCategory(selectedCategory)}` : '';
+    const desc =
+      selectedCategory !== 'ALL'
+        ? `kategori ${selectedCategory}`
+        : 'spreadsheet lengkap';
     exportSalesToCsv(
       filteredSales,
-      `Data_Penjualan_Bank_Sampah_Persatuan_${today}.csv`,
-      'spreadsheet lengkap'
+      `Data_Penjualan_Bank_Sampah_Persatuan${catSlug}_${today}.csv`,
+      desc
     );
   };
 
-  const handleExportMonthCsv = (monthKey: string, monthLabel: string, monthSales: WasteSaleRecord[]) => {
+  const handleExportMonthCsv = (
+    monthKey: string,
+    monthLabel: string,
+    monthSales: WasteSaleRecord[],
+    activeCategory?: string
+  ) => {
+    const catSlug = activeCategory ? `_${slugifyCategory(activeCategory)}` : '';
+    const desc = activeCategory
+      ? `bulan ${monthLabel} (${activeCategory})`
+      : `bulan ${monthLabel}`;
     exportSalesToCsv(
       monthSales,
-      `Penjualan_BSP_${monthKey}.csv`,
-      `bulan ${monthLabel}`
+      `Penjualan_BSP_${monthKey}${catSlug}.csv`,
+      desc
     );
   };
 
-  // Open Sale Modal (Create or Edit)
+  // Open Admin Sale Modal (Create or Edit)
   const openCreateSaleModal = (defaultMonthKey?: string) => {
-    const defaultWtId = wasteTypes.find((w) => w.isActive !== false)?.id || wasteTypes[0]?.id || '';
     setEditingSale(null);
-    setFormSellerName('');
-    setFormSellerRt('');
-
-    const now = new Date();
-    const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    if (defaultMonthKey && defaultMonthKey !== currentKey) {
-      setFormDate(`${defaultMonthKey}-15T10:00`);
-    } else {
-      setFormDate(toLocalDateTimeInput());
-    }
-
-    setFormNotes('');
-    setFormRows([
-      {
-        rowId: `row-${Date.now()}`,
-        wasteTypeId: defaultWtId,
-        weight: '',
-        pricePerKg: ''
-      }
-    ]);
+    setSaleDefaultMonthKey(defaultMonthKey);
     setSaleModalOpen(true);
   };
 
   const openEditSaleModal = (sale: WasteSaleRecord) => {
     setEditingSale(sale);
-    setFormSellerName(sale.sellerName);
-    setFormSellerRt(sale.sellerRt);
-    setFormDate(toLocalDateTimeInput(sale.date));
-    setFormNotes(sale.notes || '');
-    setFormRows(
-      sale.items.map((it, idx) => ({
-        rowId: `edit-${idx}-${Date.now()}`,
-        wasteTypeId: it.wasteTypeId,
-        weight: String(it.weight),
-        pricePerKg: String(it.pricePerKg)
-      }))
-    );
+    setSaleDefaultMonthKey(undefined);
     setSaleModalOpen(true);
   };
 
-  const handleSaveSale = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formSellerName.trim() || !formSellerRt.trim()) {
-      showToast('error', 'Nama warga dan RT wajib diisi.');
-      return;
-    }
-
-    const itemsPayload: Array<{ wasteTypeId: string; weight: number; pricePerKg: number }> = [];
-    for (let i = 0; i < formRows.length; i++) {
-      const r = formRows[i];
-      const w = parseFloat(r.weight);
-      const p = parseFloat(r.pricePerKg);
-      if (!r.wasteTypeId || !Number.isFinite(w) || w <= 0 || !Number.isFinite(p) || p <= 0) {
-        showToast('error', `Lengkapi jenis sampah, berat (> 0), dan harga aktual (> 0) pada baris #${i + 1}.`);
-        return;
-      }
-      itemsPayload.push({
-        wasteTypeId: r.wasteTypeId,
-        weight: Number(w.toFixed(2)),
-        pricePerKg: Math.round(p)
-      });
-    }
-
-    setSavingSale(true);
-    try {
-      const isoDate = formDate ? new Date(formDate).toISOString() : new Date().toISOString();
-      if (editingSale) {
-        await api.updateAdminSale(editingSale.id, {
-          sellerName: formSellerName.trim(),
-          sellerRt: formSellerRt.trim(),
-          date: isoDate,
-          items: itemsPayload,
-          notes: formNotes.trim()
-        });
-        showToast('success', `Data transaksi ${editingSale.id} berhasil diperbarui.`);
-      } else {
-        const res = await api.createAdminSale({
-          sellerName: formSellerName.trim(),
-          sellerRt: formSellerRt.trim(),
-          date: isoDate,
-          items: itemsPayload,
-          notes: formNotes.trim()
-        });
-        showToast('success', `Data transaksi baru ${res.sale.id} berhasil ditambahkan.`);
-      }
-      setSaleModalOpen(false);
-      await loadCoreData();
-    } catch (err: any) {
-      showToast('error', err?.message || 'Gagal menyimpan data penjualan.');
-    } finally {
-      setSavingSale(false);
-    }
+  const handleSaleModalSaved = async (message: string) => {
+    showToast('success', message);
+    await loadCoreData();
   };
 
   const handleConfirmDeleteSale = async () => {
@@ -517,7 +426,9 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
     }
   };
 
-  const hasActiveFilters = Boolean(searchQuery || selectedRt !== 'ALL' || startDate || endDate);
+  const hasActiveFilters = Boolean(
+    searchQuery || selectedCategory !== 'ALL' || selectedRt !== 'ALL' || startDate || endDate
+  );
 
   const sidebarGroups: Array<{
     groupLabel: string;
@@ -758,6 +669,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
           {activeTab === 'monthly' && (
             <AdminMonthlySection
               sales={sales}
+              wasteTypes={wasteTypes}
               loading={loading}
               onCreateSale={openCreateSaleModal}
               onEditSale={openEditSaleModal}
@@ -770,6 +682,167 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
           {/* TAB 2: SEMUA DATA (SPREADSHEET + GRAFIK TREN) */}
           {activeTab === 'spreadsheet' && (
             <div className="space-y-5">
+              {/* Filter & Action Toolbar (Placed at top so KPIs, Charts, Table & CSV respond visibly) */}
+              <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+                  {/* Search & Filters */}
+                  <div className="flex flex-wrap items-center gap-2.5 flex-1">
+                    <div className="relative flex-1 min-w-[220px]">
+                      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Cari kode, nama warga, RT, jenis sampah..."
+                        aria-label="Cari semua transaksi"
+                        className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setSearchQuery('')}
+                          aria-label="Bersihkan pencarian"
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Waste Category Dropdown */}
+                    <div className="relative flex items-center">
+                      <Filter className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 absolute left-3 pointer-events-none" />
+                      <select
+                        value={selectedCategory}
+                        onChange={(e) => setSelectedCategory(e.target.value)}
+                        aria-label="Filter kategori sampah"
+                        className="pl-8 pr-7 py-2 text-xs font-semibold rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                      >
+                        <option value="ALL">Semua Kategori</option>
+                        {categoryOptions.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <select
+                      value={selectedRt}
+                      onChange={(e) => setSelectedRt(e.target.value)}
+                      aria-label="Filter wilayah RT"
+                      className="px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="ALL">Semua RT</option>
+                      {availableRts.map((rt) => (
+                        <option key={rt} value={rt}>
+                          {rt}
+                        </option>
+                      ))}
+                    </select>
+
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      title="Tanggal mulai"
+                      className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <span className="text-xs text-neutral-400">s/d</span>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      title="Tanggal selesai"
+                      className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+
+                    {hasActiveFilters && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchQuery('');
+                          setSelectedCategory('ALL');
+                          setSelectedRt('ALL');
+                          setStartDate('');
+                          setEndDate('');
+                        }}
+                        className="px-3 py-2 rounded-xl text-xs font-semibold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors whitespace-nowrap"
+                      >
+                        Reset Filter
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Primary Actions */}
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={loadCoreData}
+                      title="Muat ulang data"
+                      className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors"
+                    >
+                      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => openCreateSaleModal()}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Catat Manual</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleExportAllCsv}
+                      disabled={filteredSales.length === 0}
+                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 flex items-center gap-1.5 transition-colors shadow-xs whitespace-nowrap"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>{hasActiveFilters ? 'Ekspor CSV Terfilter' : 'Ekspor Spreadsheet (.CSV)'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {hasActiveFilters && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500 dark:text-neutral-400 pt-0.5">
+                    <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+                      Filter aktif diterapkan ke KPI, grafik, tabel & CSV
+                    </span>
+                    <span aria-hidden="true">·</span>
+                    <span className="font-mono tabular-nums">
+                      {filteredSales.length} dari {sales.length} transaksi
+                    </span>
+                    {selectedCategory !== 'ALL' && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          Kategori: <strong className="text-neutral-800 dark:text-neutral-200">{selectedCategory}</strong>
+                        </span>
+                      </>
+                    )}
+                    {selectedRt !== 'ALL' && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          Wilayah: <strong className="text-neutral-800 dark:text-neutral-200">{selectedRt}</strong>
+                        </span>
+                      </>
+                    )}
+                    {searchQuery.trim() && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          Kata kunci: <strong className="text-neutral-800 dark:text-neutral-200">&ldquo;{searchQuery.trim()}&rdquo;</strong>
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Compact KPI Strip */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
                 <div className="bg-white dark:bg-neutral-900 rounded-2xl p-4 border border-neutral-200 dark:border-neutral-800">
@@ -829,99 +902,6 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
               {/* All-Time Sales Charts (Synced with active filter) */}
               <AdminAllSalesCharts sales={filteredSales} />
 
-              {/* Filter & Action Toolbar */}
-              <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                  {/* Search & Filters */}
-                  <div className="flex flex-wrap items-center gap-2.5 flex-1">
-                    <div className="relative flex-1 min-w-[220px]">
-                      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="Cari kode, nama warga, RT, jenis sampah..."
-                        className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      />
-                    </div>
-
-                    <select
-                      value={selectedRt}
-                      onChange={(e) => setSelectedRt(e.target.value)}
-                      className="px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      <option value="ALL">Semua RT</option>
-                      {availableRts.map((rt) => (
-                        <option key={rt} value={rt}>
-                          {rt}
-                        </option>
-                      ))}
-                    </select>
-
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      title="Tanggal mulai"
-                      className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <span className="text-xs text-neutral-400">s/d</span>
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      title="Tanggal selesai"
-                      className="px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-
-                    {hasActiveFilters && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSearchQuery('');
-                          setSelectedRt('ALL');
-                          setStartDate('');
-                          setEndDate('');
-                        }}
-                        className="px-2.5 py-2 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white"
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Primary Actions */}
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={loadCoreData}
-                      title="Muat ulang data"
-                      className="p-2 rounded-xl text-neutral-600 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors"
-                    >
-                      <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => openCreateSaleModal()}
-                      className="px-3.5 py-2 rounded-xl text-xs font-bold text-neutral-800 dark:text-neutral-100 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 flex items-center gap-1.5 transition-colors whitespace-nowrap"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Catat Manual</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleExportAllCsv}
-                      className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 flex items-center gap-1.5 transition-colors shadow-xs whitespace-nowrap"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>Ekspor Spreadsheet (.CSV)</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
               {/* Raw Spreadsheet Table */}
               <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
                 <div className="overflow-x-auto">
@@ -958,6 +938,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
                       ) : (
                         flattenedRows.map(({ rowNumber, sale, item, itemIndex }) => {
                           const isFirstItem = itemIndex === 0;
+                          const intactSale = originalSalesById.get(sale.id) || sale;
                           const dateFormatted = new Date(sale.date).toLocaleString('id-ID', {
                             day: '2-digit',
                             month: 'short',
@@ -1034,7 +1015,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
                                   <div className="inline-flex items-center gap-1">
                                     <button
                                       type="button"
-                                      onClick={() => openEditSaleModal(sale)}
+                                      onClick={() => openEditSaleModal(intactSale)}
                                       title="Sunting transaksi"
                                       className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                                     >
@@ -1042,7 +1023,7 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
                                     </button>
                                     <button
                                       type="button"
-                                      onClick={() => setDeletingSale(sale)}
+                                      onClick={() => setDeletingSale(intactSale)}
                                       title="Hapus transaksi"
                                       className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-red-50 dark:hover:bg-red-950/50 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                                     >
@@ -1161,223 +1142,15 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
         </main>
       </div>
 
-      {/* MODAL: CREATE / EDIT SALE */}
-      {saleModalOpen && (
-        <div className="fixed inset-0 z-50 bg-neutral-950/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-xl">
-            <div className="px-6 py-4 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-extrabold text-neutral-900 dark:text-white">
-                  {editingSale ? `Sunting Data Penjualan (${editingSale.id})` : 'Catat Penjualan Sampah Manual'}
-                </h3>
-                <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  Perubahan langsung tersimpan ke data spreadsheet dan memperbarui grafik.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSaleModalOpen(false)}
-                className="p-1.5 rounded-lg text-neutral-500 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveSale} className="p-6 space-y-5 overflow-y-auto flex-1">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                    Nama Warga *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formSellerName}
-                    onChange={(e) => setFormSellerName(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                    RT / Wilayah *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formSellerRt}
-                    onChange={(e) => setFormSellerRt(e.target.value)}
-                    placeholder="Contoh: RT 003"
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                    Tanggal & Waktu *
-                  </label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={formDate}
-                    onChange={(e) => setFormDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
-                    Rincian Jenis Sampah & Harga Aktual
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const defaultWtId = wasteTypes.find((w) => w.isActive !== false)?.id || wasteTypes[0]?.id || '';
-                      setFormRows((prev) => [
-                        ...prev,
-                        { rowId: `r-${Date.now()}-${Math.random()}`, wasteTypeId: defaultWtId, weight: '', pricePerKg: '' }
-                      ]);
-                    }}
-                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>Tambah Baris</span>
-                  </button>
-                </div>
-
-                {formRows.map((row, idx) => {
-                  const wt = wasteTypes.find((w) => w.id === row.wasteTypeId);
-                  const wNum = parseFloat(row.weight) || 0;
-                  const pNum = parseFloat(row.pricePerKg) || 0;
-                  const sub = Math.round(wNum * pNum);
-                  return (
-                    <div
-                      key={row.rowId}
-                      className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end p-3 rounded-xl bg-neutral-50 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-700"
-                    >
-                      <div className="sm:col-span-4 space-y-1">
-                        <label className="block text-[10px] font-bold text-neutral-500">
-                          Jenis Sampah #{idx + 1}
-                        </label>
-                        <select
-                          value={row.wasteTypeId}
-                          onChange={(e) =>
-                            setFormRows((prev) =>
-                              prev.map((item) =>
-                                item.rowId === row.rowId ? { ...item, wasteTypeId: e.target.value } : item
-                              )
-                            )
-                          }
-                          className="w-full px-2.5 py-2 text-xs rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                        >
-                          {wasteTypes.map((type) => (
-                            <option key={type.id} value={type.id}>
-                              {type.name} ({type.category})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="sm:col-span-2 space-y-1">
-                        <label className="block text-[10px] font-bold text-neutral-500">
-                          Berat ({wt?.unit || 'kg'})
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0.01"
-                          required
-                          value={row.weight}
-                          onChange={(e) =>
-                            setFormRows((prev) =>
-                              prev.map((item) =>
-                                item.rowId === row.rowId ? { ...item, weight: e.target.value } : item
-                              )
-                            )
-                          }
-                          className="w-full px-2.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-3 space-y-1">
-                        <label className="block text-[10px] font-bold text-neutral-500">
-                          Harga / {wt?.unit || 'kg'} (Rp)
-                        </label>
-                        <input
-                          type="number"
-                          step="50"
-                          min="1"
-                          required
-                          value={row.pricePerKg}
-                          onChange={(e) =>
-                            setFormRows((prev) =>
-                              prev.map((item) =>
-                                item.rowId === row.rowId ? { ...item, pricePerKg: e.target.value } : item
-                              )
-                            )
-                          }
-                          className="w-full px-2.5 py-2 text-xs font-mono tabular-nums rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                        />
-                      </div>
-
-                      <div className="sm:col-span-2 space-y-1">
-                        <label className="block text-[10px] font-bold text-neutral-500">Subtotal</label>
-                        <div className="px-2.5 py-2 text-xs font-mono tabular-nums font-bold text-emerald-700 dark:text-emerald-400 bg-white dark:bg-neutral-900 rounded-lg border border-neutral-200 dark:border-neutral-700 truncate">
-                          {formatRupiah(sub)}
-                        </div>
-                      </div>
-
-                      <div className="sm:col-span-1 flex justify-end">
-                        <button
-                          type="button"
-                          disabled={formRows.length === 1}
-                          onClick={() =>
-                            setFormRows((prev) =>
-                              prev.length > 1 ? prev.filter((item) => item.rowId !== row.rowId) : prev
-                            )
-                          }
-                          className="p-2 rounded-lg text-neutral-500 hover:text-red-600 disabled:opacity-30"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                  Catatan Tambahan
-                </label>
-                <textarea
-                  rows={2}
-                  value={formNotes}
-                  onChange={(e) => setFormNotes(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-3 border-t border-neutral-200 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => setSaleModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                >
-                  Batal
-                </button>
-                <button
-                  type="submit"
-                  disabled={savingSale}
-                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60"
-                >
-                  {savingSale ? 'Menyimpan...' : 'Simpan Data'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* MODAL: ADMIN CREATE / EDIT SALE (SUPPORTS BACKDATE & PHOTO UPLOAD) */}
+      <AdminSaleFormModal
+        open={saleModalOpen}
+        editingSale={editingSale}
+        defaultMonthKey={saleDefaultMonthKey}
+        wasteTypes={wasteTypes}
+        onClose={() => setSaleModalOpen(false)}
+        onSaved={handleSaleModalSaved}
+      />
 
       {/* MODAL: DELETE CONFIRMATION */}
       {deletingSale && (
@@ -1449,11 +1222,17 @@ export const AdminSpreadsheetDashboard: React.FC<AdminSpreadsheetDashboardProps>
                   </label>
                   <input
                     type="text"
+                    list="waste-category-suggestions"
                     value={catGroup}
                     onChange={(e) => setCatGroup(e.target.value)}
-                    placeholder="Plastik / Kertas / Logam"
+                    placeholder="Organik / Plastik / Kertas / Logam"
                     className="w-full px-3 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-white"
                   />
+                  <datalist id="waste-category-suggestions">
+                    {categoryOptions.map((cat) => (
+                      <option key={cat} value={cat} />
+                    ))}
+                  </datalist>
                 </div>
                 <div className="space-y-1">
                   <label className="block text-xs font-bold text-neutral-700 dark:text-neutral-300">

@@ -13,7 +13,9 @@ import {
   Scale,
   Wallet,
   MapPin,
-  ArrowRight
+  ArrowRight,
+  Filter,
+  X
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -29,16 +31,23 @@ import {
   CartesianGrid,
   Tooltip
 } from 'recharts';
-import type { WasteSaleRecord } from '../../types';
+import type { WasteSaleRecord, WasteType } from '../../types';
+import { buildWasteCategoryOptions, filterAndProjectSales } from '../../utils/adminSalesFilter';
 
 interface AdminMonthlySectionProps {
   sales: WasteSaleRecord[];
+  wasteTypes: WasteType[];
   loading: boolean;
   onCreateSale: (defaultMonthKey?: string) => void;
   onEditSale: (sale: WasteSaleRecord) => void;
   onDeleteSale: (sale: WasteSaleRecord) => void;
   onPreviewPhoto: (photo: { url: string; title: string }) => void;
-  onExportMonthCsv: (monthKey: string, monthLabel: string, monthSales: WasteSaleRecord[]) => void;
+  onExportMonthCsv: (
+    monthKey: string,
+    monthLabel: string,
+    monthSales: WasteSaleRecord[],
+    activeCategory?: string
+  ) => void;
 }
 
 const MONTH_NAMES_ID = [
@@ -111,6 +120,7 @@ function formatCompactRupiah(val: number): string {
 
 export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
   sales,
+  wasteTypes,
   loading,
   onCreateSale,
   onEditSale,
@@ -121,7 +131,14 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
   const currentMonthKey = useMemo(() => getCurrentMonthKey(), []);
   const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthKey);
   const [chartMetric, setChartMetric] = useState<'amount' | 'weight'>('amount');
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [monthSearch, setMonthSearch] = useState<string>('');
+
+  // Exact database waste categories + guaranteed "Organik"
+  const categoryOptions = useMemo(
+    () => buildWasteCategoryOptions(wasteTypes, sales),
+    [wasteTypes, sales]
+  );
 
   // Collect all months present in sales + current month + selected month
   const availableMonthOptions = useMemo(() => {
@@ -155,37 +172,30 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [sales, selectedMonth]);
 
-  // Filtered table rows inside selectedMonth
-  const filteredMonthSales = useMemo(() => {
-    const q = monthSearch.trim().toLowerCase();
-    if (!q) return monthSales;
-    return monthSales.filter((s) => {
-      const inHeader =
-        s.id.toLowerCase().includes(q) ||
-        s.sellerName.toLowerCase().includes(q) ||
-        s.sellerRt.toLowerCase().includes(q) ||
-        (s.notes || '').toLowerCase().includes(q);
-      const inItems = s.items.some(
-        (it) =>
-          it.wasteTypeName.toLowerCase().includes(q) ||
-          (it.category || '').toLowerCase().includes(q)
-      );
-      return inHeader || inItems;
-    });
-  }, [monthSales, monthSearch]);
+  // Filtered & category-projected sales feeding KPIs, charts, table, and CSV export
+  const { projectedSales: activeMonthSales, originalById } = useMemo(
+    () =>
+      filterAndProjectSales(monthSales, {
+        category: selectedCategory,
+        searchQuery: monthSearch
+      }),
+    [monthSales, selectedCategory, monthSearch]
+  );
 
-  // Monthly KPI summary
+  const hasActiveFilter = selectedCategory !== 'ALL' || Boolean(monthSearch.trim());
+
+  // Monthly KPI summary (dynamically synced with active filter)
   const kpi = useMemo(() => {
-    const totalTransactions = monthSales.length;
+    const totalTransactions = activeMonthSales.length;
     const totalWeight = Number(
-      monthSales.reduce((acc, s) => acc + (s.totalWeight || 0), 0).toFixed(2)
+      activeMonthSales.reduce((acc, s) => acc + (s.totalWeight || 0), 0).toFixed(2)
     );
     const totalAmount = Math.round(
-      monthSales.reduce((acc, s) => acc + (s.totalAmount || 0), 0)
+      activeMonthSales.reduce((acc, s) => acc + (s.totalAmount || 0), 0)
     );
 
     const rtTotals = new Map<string, { amount: number; weight: number; count: number }>();
-    monthSales.forEach((s) => {
+    activeMonthSales.forEach((s) => {
       const rt = (s.sellerRt || 'Lainnya').trim();
       const prev = rtTotals.get(rt) || { amount: 0, weight: 0, count: 0 };
       prev.amount += s.totalAmount || 0;
@@ -211,9 +221,9 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
       topRtWeight: Number(topRtWeight.toFixed(2)),
       activeRtCount: rtTotals.size
     };
-  }, [monthSales]);
+  }, [activeMonthSales]);
 
-  // Chart 1: Daily trend for selected month
+  // Chart 1: Daily trend for selected month (synced with active filter)
   const dailyChartData = useMemo(() => {
     const daysCount = getDaysInMonth(selectedMonth);
     const buckets: Array<{ day: string; label: string; amount: number; weight: number; transactions: number }> = [];
@@ -227,7 +237,7 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
       });
     }
 
-    monthSales.forEach((sale) => {
+    activeMonthSales.forEach((sale) => {
       const dt = new Date(sale.date);
       const dayIdx = dt.getDate() - 1;
       if (dayIdx >= 0 && dayIdx < buckets.length) {
@@ -238,12 +248,12 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
     });
 
     return buckets;
-  }, [monthSales, selectedMonth]);
+  }, [activeMonthSales, selectedMonth]);
 
-  // Chart 2: Waste category composition
+  // Chart 2: Waste category composition (synced with active filter)
   const categoryData = useMemo(() => {
     const map = new Map<string, { name: string; amount: number; weight: number }>();
-    monthSales.forEach((sale) => {
+    activeMonthSales.forEach((sale) => {
       sale.items.forEach((item) => {
         const cat = (item.category || 'Anorganik').trim();
         const prev = map.get(cat) || { name: cat, amount: 0, weight: 0 };
@@ -255,7 +265,7 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
     return Array.from(map.values()).sort((a, b) =>
       chartMetric === 'amount' ? b.amount - a.amount : b.weight - a.weight
     );
-  }, [monthSales, chartMetric]);
+  }, [activeMonthSales, chartMetric]);
 
   const categoryMetricTotal = useMemo(() => {
     return categoryData.reduce(
@@ -264,10 +274,10 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
     );
   }, [categoryData, chartMetric]);
 
-  // Chart 3: Contribution per RT
+  // Chart 3: Contribution per RT (synced with active filter)
   const rtChartData = useMemo(() => {
     const map = new Map<string, { rt: string; amount: number; weight: number; count: number }>();
-    monthSales.forEach((sale) => {
+    activeMonthSales.forEach((sale) => {
       const rt = (sale.sellerRt || 'Lainnya').trim();
       const prev = map.get(rt) || { rt, amount: 0, weight: 0, count: 0 };
       prev.amount += Math.round(sale.totalAmount || 0);
@@ -279,7 +289,7 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
     return Array.from(map.values())
       .sort((a, b) => (chartMetric === 'amount' ? b.amount - a.amount : b.weight - a.weight))
       .slice(0, 8);
-  }, [monthSales, chartMetric]);
+  }, [activeMonthSales, chartMetric]);
 
   const selectedMonthLabel = formatMonthLabel(selectedMonth);
   const isCurrentMonth = selectedMonth === currentMonthKey;
@@ -381,14 +391,110 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
 
           <button
             type="button"
-            onClick={() => onExportMonthCsv(selectedMonth, selectedMonthLabel, monthSales)}
-            disabled={monthSales.length === 0}
+            onClick={() =>
+              onExportMonthCsv(
+                selectedMonth,
+                selectedMonthLabel,
+                activeMonthSales,
+                selectedCategory !== 'ALL' ? selectedCategory : undefined
+              )
+            }
+            disabled={activeMonthSales.length === 0}
             className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 flex items-center gap-1.5 transition-colors whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Ekspor CSV Bulan Ini</span>
+            <span>{hasActiveFilter ? 'Ekspor CSV Terfilter' : 'Ekspor CSV Bulan Ini'}</span>
           </button>
         </div>
+      </div>
+
+      {/* Category Filter & Search Toolbar (Controls KPIs, Charts, Table, and CSV) */}
+      <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-3.5 sm:p-4 space-y-2.5">
+        <div className="flex flex-col md:flex-row md:items-center gap-2.5">
+          {/* Search Bar */}
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={monthSearch}
+              onChange={(e) => setMonthSearch(e.target.value)}
+              placeholder="Cari kode transaksi, nama warga, RT, atau jenis sampah..."
+              aria-label="Cari transaksi bulan ini"
+              className="w-full pl-9 pr-8 py-2 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            {monthSearch && (
+              <button
+                type="button"
+                onClick={() => setMonthSearch('')}
+                aria-label="Bersihkan pencarian"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Waste Category Dropdown */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <div className="relative flex items-center">
+              <Filter className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 absolute left-3 pointer-events-none" />
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                aria-label="Filter kategori sampah bulan ini"
+                className="pl-8 pr-7 py-2 text-xs font-semibold rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+              >
+                <option value="ALL">Semua Kategori Sampah</option>
+                {categoryOptions.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {hasActiveFilter && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCategory('ALL');
+                  setMonthSearch('');
+                }}
+                className="px-3 py-2 rounded-xl text-xs font-semibold text-neutral-700 dark:text-neutral-200 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-200 dark:border-neutral-700 transition-colors whitespace-nowrap"
+              >
+                Reset Filter
+              </button>
+            )}
+          </div>
+        </div>
+
+        {hasActiveFilter && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500 dark:text-neutral-400 pt-0.5">
+            <span className="font-semibold text-emerald-700 dark:text-emerald-400">
+              Filter aktif diterapkan ke KPI, grafik, tabel & CSV
+            </span>
+            <span aria-hidden="true">·</span>
+            <span className="font-mono tabular-nums">
+              {activeMonthSales.length} dari {monthSales.length} transaksi
+            </span>
+            {selectedCategory !== 'ALL' && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  Kategori: <strong className="text-neutral-800 dark:text-neutral-200">{selectedCategory}</strong>
+                </span>
+              </>
+            )}
+            {monthSearch.trim() && (
+              <>
+                <span aria-hidden="true">·</span>
+                <span>
+                  Kata kunci: <strong className="text-neutral-800 dark:text-neutral-200">&ldquo;{monthSearch.trim()}&rdquo;</strong>
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Empty Month Helper Banner with Quick Jump */}
@@ -423,6 +529,31 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
               <span>Catat Penjualan Pertama</span>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Empty Filter Match Banner (Month has data, but filter yields 0 results) */}
+      {!loading && monthSales.length > 0 && activeMonthSales.length === 0 && (
+        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <h3 className="text-sm font-extrabold text-neutral-900 dark:text-white">
+              Tidak ada transaksi yang cocok dengan filter di {selectedMonthLabel}
+            </h3>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Bulan {selectedMonthLabel} memiliki {monthSales.length} transaksi, namun belum ada yang cocok dengan{' '}
+              {selectedCategory !== 'ALL' ? `kategori "${selectedCategory}"` : 'pencarian saat ini'}.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedCategory('ALL');
+              setMonthSearch('');
+            }}
+            className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 transition-colors whitespace-nowrap shrink-0"
+          >
+            Reset Filter
+          </button>
         </div>
       )}
 
@@ -723,24 +854,14 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
           <div>
             <h3 className="text-sm font-extrabold text-neutral-900 dark:text-white">
               Rincian Transaksi · {selectedMonthLabel}
+              {selectedCategory !== 'ALL' ? ` · ${selectedCategory}` : ''}
             </h3>
             <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Menampilkan {filteredMonthSales.length} dari {monthSales.length} transaksi khusus periode ini.
+              Menampilkan {activeMonthSales.length} dari {monthSales.length} transaksi khusus periode ini.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[210px]">
-              <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={monthSearch}
-                onChange={(e) => setMonthSearch(e.target.value)}
-                placeholder="Cari warga, RT, jenis sampah..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
-
             <button
               type="button"
               onClick={() => onCreateSale(selectedMonth)}
@@ -774,15 +895,17 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
                     Memuat transaksi bulan ini...
                   </td>
                 </tr>
-              ) : filteredMonthSales.length === 0 ? (
+              ) : activeMonthSales.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="py-10 text-center text-neutral-500 dark:text-neutral-400">
                     Tidak ada transaksi di {selectedMonthLabel}
+                    {selectedCategory !== 'ALL' ? ` untuk kategori ${selectedCategory}` : ''}
                     {monthSearch ? ` yang cocok dengan "${monthSearch}"` : ''}.
                   </td>
                 </tr>
               ) : (
-                filteredMonthSales.map((sale) => {
+                activeMonthSales.map((sale) => {
+                  const intactSale = originalById.get(sale.id) || sale;
                   const dateFormatted = new Date(sale.date).toLocaleString('id-ID', {
                     day: '2-digit',
                     month: 'short',
@@ -814,6 +937,11 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
                               <span className="font-semibold text-neutral-900 dark:text-white">
                                 {it.wasteTypeName}
                               </span>
+                              {it.category && (
+                                <span className="ml-1 text-[10px] text-neutral-500 dark:text-neutral-400">
+                                  ({it.category})
+                                </span>
+                              )}
                               <span className="text-neutral-500 dark:text-neutral-400 font-mono tabular-nums">
                                 {' '}· {it.weight} {it.unit || 'kg'} × {formatRupiah(it.pricePerKg)}
                               </span>
@@ -850,7 +978,7 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => onEditSale(sale)}
+                            onClick={() => onEditSale(intactSale)}
                             title="Sunting transaksi"
                             className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                           >
@@ -858,7 +986,7 @@ export const AdminMonthlySection: React.FC<AdminMonthlySectionProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => onDeleteSale(sale)}
+                            onClick={() => onDeleteSale(intactSale)}
                             title="Hapus transaksi"
                             className="p-1.5 rounded-lg text-neutral-600 dark:text-neutral-300 hover:bg-red-50 dark:hover:bg-red-950/50 hover:text-red-600 dark:hover:text-red-400 transition-colors"
                           >

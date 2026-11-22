@@ -64,7 +64,6 @@ export const api = {
   submitPublicSale: (data: {
     sellerName: string;
     sellerRt: string;
-    date?: string;
     items: Array<{ wasteTypeId: string; weight: number; pricePerKg: number }>;
     photoUrl?: string;
     notes?: string;
